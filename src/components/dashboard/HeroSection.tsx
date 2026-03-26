@@ -1,5 +1,6 @@
 import { motion } from "framer-motion";
 import { ArrowRight, Sparkles } from "lucide-react";
+import { useNavigate } from "react-router-dom";
 
 interface HeroSectionProps {
   currentPhase: number;
@@ -8,6 +9,7 @@ interface HeroSectionProps {
 }
 
 export function HeroSection({ currentPhase, phaseName, phaseDescription }: HeroSectionProps) {
+  const navigate = useNavigate();
   return (
     <section className="space-y-6">
       <div>
@@ -42,7 +44,7 @@ export function HeroSection({ currentPhase, phaseName, phaseDescription }: HeroS
             {phaseDescription}
           </p>
 
-          <button className="inline-flex items-center gap-2 px-5 py-2.5 rounded-xl gradient-accent text-accent-foreground text-sm font-medium transition-all group-hover:shadow-lg group-hover:shadow-accent/20">
+          <button onClick={() => navigate("/project/intake")} className="inline-flex items-center gap-2 px-5 py-2.5 rounded-xl gradient-accent text-accent-foreground text-sm font-medium transition-all group-hover:shadow-lg group-hover:shadow-accent/20">
             Start Now
             <ArrowRight className="h-4 w-4 transition-transform group-hover:translate-x-0.5" strokeWidth={2} />
           </button>
