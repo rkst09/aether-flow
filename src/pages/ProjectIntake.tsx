@@ -39,13 +39,13 @@ type UploadState = "idle" | "dragging" | "uploading" | "processing" | "complete"
 type ErrorType = "unsupported" | "too-large" | "network" | "processing" | null;
 
 const STAGES = [
-  "Upload",
-  "Design Intake",
-  "Screen Derivation",
-  "Prototype Prompt",
-  "UX Audit",
-  "Copy Review",
-  "Documentation",
+  { label: "Upload", short: "Upload" },
+  { label: "Design Intake", short: "Intake" },
+  { label: "Screens", short: "Screens" },
+  { label: "Prototype", short: "Prototype" },
+  { label: "Audit", short: "Audit" },
+  { label: "Copy", short: "Copy" },
+  { label: "Docs", short: "Docs" },
 ];
 
 const ACCEPTED_TYPES = [
@@ -54,7 +54,7 @@ const ACCEPTED_TYPES = [
   "application/vnd.openxmlformats-officedocument.wordprocessingml.document",
 ];
 const ACCEPTED_EXTENSIONS = [".pdf", ".doc", ".docx"];
-const MAX_FILE_SIZE = 25 * 1024 * 1024; // 25MB
+const MAX_FILE_SIZE = 25 * 1024 * 1024;
 
 const PROCESSING_MESSAGES = [
   "Reading document structure…",
@@ -63,45 +63,62 @@ const PROCESSING_MESSAGES = [
   "Preparing for analysis…",
 ];
 
-const INDUSTRIES = ["SaaS", "Fintech", "Healthcare", "E-commerce", "Education", "Enterprise", "Consumer", "Other"];
-const PRODUCT_TYPES = ["Web App", "Mobile App", "Desktop App", "Design System", "Marketing Site", "Internal Tool"];
-const MARKETS = ["B2B", "B2C", "B2B2C", "Internal", "Marketplace"];
-const COMPANY_STAGES = ["Pre-seed", "Seed", "Series A", "Series B+", "Growth", "Enterprise"];
+const INDUSTRIES = ["SaaS", "Fintech", "Healthtech", "Edtech", "E-commerce", "AI / ML", "Web3", "Logistics", "Enterprise", "Consumer", "Other"];
+const PRODUCT_TYPES = ["Web App", "Mobile App", "Dashboard", "Marketplace", "SaaS Platform", "Design System", "Marketing Site", "Internal Tool"];
+const MARKETS = ["B2B", "B2C", "D2C", "B2B2C", "Enterprise", "Government", "Marketplace"];
+const COMPANY_STAGES = ["Startup", "Early-stage", "Growth", "Scale-up", "Enterprise"];
 
-// --- Progress Tracker ---
+// --- Connected Step Progress Tracker ---
 function StageTracker({ current }: { current: number }) {
   return (
-    <div className="flex items-center gap-1">
-      {STAGES.map((stage, i) => {
-        const isActive = i === current;
-        const isDone = i < current;
-        return (
-          <div key={stage} className="flex items-center gap-1">
-            <div className="flex items-center gap-1.5">
-              <div
-                className={`h-1.5 rounded-full transition-all duration-300 ${
-                  isActive
-                    ? "w-6 bg-accent"
-                    : isDone
-                    ? "w-4 bg-accent/40"
-                    : "w-3 bg-border"
-                }`}
-              />
-              <span
-                className={`text-[11px] hidden sm:inline transition-colors ${
-                  isActive
-                    ? "text-foreground font-medium"
-                    : isDone
-                    ? "text-muted-foreground"
-                    : "text-muted-foreground/50"
-                }`}
-              >
-                {stage}
-              </span>
+    <div className="w-full">
+      <div className="flex items-center">
+        {STAGES.map((stage, i) => {
+          const isActive = i === current;
+          const isDone = i < current;
+          const isLast = i === STAGES.length - 1;
+
+          return (
+            <div key={stage.label} className="flex items-center flex-1 last:flex-none">
+              {/* Step circle + label */}
+              <div className="flex flex-col items-center gap-1.5 relative">
+                <div
+                  className={`
+                    h-7 w-7 rounded-full flex items-center justify-center text-[11px] font-medium transition-all duration-300 shrink-0
+                    ${isDone ? "gradient-accent text-accent-foreground" : ""}
+                    ${isActive ? "bg-accent/10 text-accent ring-2 ring-accent/25" : ""}
+                    ${!isDone && !isActive ? "bg-secondary text-muted-foreground/50" : ""}
+                  `}
+                >
+                  {isDone ? (
+                    <Check className="h-3 w-3" strokeWidth={2.5} />
+                  ) : (
+                    <span>{i + 1}</span>
+                  )}
+                </div>
+                <span
+                  className={`text-[10px] font-medium whitespace-nowrap transition-colors duration-300 ${
+                    isActive ? "text-foreground" : isDone ? "text-muted-foreground" : "text-muted-foreground/40"
+                  }`}
+                >
+                  {stage.short}
+                </span>
+              </div>
+
+              {/* Connector line */}
+              {!isLast && (
+                <div className="flex-1 h-px mx-1.5 mt-[-18px]">
+                  <div
+                    className={`h-full w-full rounded-full transition-colors duration-500 ${
+                      isDone ? "bg-accent/40" : "bg-border"
+                    }`}
+                  />
+                </div>
+              )}
             </div>
-          </div>
-        );
-      })}
+          );
+        })}
+      </div>
     </div>
   );
 }
@@ -209,18 +226,18 @@ function UploadZone({
         onDragLeave={isInteractive ? handleDragLeave : undefined}
         onDrop={isInteractive ? handleDrop : undefined}
         onClick={isInteractive ? () => inputRef.current?.click() : undefined}
-        className={`relative rounded-2xl border-2 border-dashed transition-all duration-200 ${
+        className={`relative rounded-2xl border border-dashed transition-all duration-300 ${
           state === "complete"
-            ? "border-[hsl(var(--success))]/30 bg-[hsl(var(--success-soft))]"
+            ? "border-[hsl(var(--success))]/20 bg-[hsl(var(--success-soft))]"
             : dragOver
-            ? "border-accent bg-accent-soft cursor-pointer"
+            ? "border-accent/50 bg-accent/[0.03] cursor-pointer"
             : state === "error"
             ? "border-destructive/20 bg-destructive/[0.02] cursor-pointer"
             : isInteractive
-            ? "border-border hover:border-accent/40 hover:bg-accent-soft/50 cursor-pointer"
-            : "border-border bg-secondary/30"
+            ? "border-border hover:border-accent/30 hover:bg-accent/[0.02] cursor-pointer"
+            : "border-border bg-secondary/20"
         } ${isInteractive ? "" : "pointer-events-none"}`}
-        whileHover={isInteractive ? { scale: 1.005 } : undefined}
+        whileHover={isInteractive ? { scale: 1.003 } : undefined}
       >
         <input
           ref={inputRef}
@@ -230,9 +247,8 @@ function UploadZone({
           className="hidden"
         />
 
-        <div className="flex flex-col items-center justify-center py-12 px-6 text-center">
+        <div className="flex flex-col items-center justify-center py-14 px-8 text-center">
           <AnimatePresence mode="wait">
-            {/* Idle / Drag */}
             {(state === "idle" || (state === "error" && !dragOver)) && (
               <motion.div
                 key="idle"
@@ -241,7 +257,7 @@ function UploadZone({
                 exit={{ opacity: 0 }}
                 className="flex flex-col items-center"
               >
-                <div className="h-12 w-12 rounded-xl bg-secondary flex items-center justify-center mb-4">
+                <div className="h-11 w-11 rounded-xl bg-secondary/80 flex items-center justify-center mb-4">
                   <Upload className="h-5 w-5 text-muted-foreground" strokeWidth={1.5} />
                 </div>
                 <p className="text-sm font-medium text-foreground">
@@ -253,23 +269,21 @@ function UploadZone({
               </motion.div>
             )}
 
-            {/* Dragging */}
             {dragOver && (
               <motion.div
                 key="drag"
-                initial={{ opacity: 0, scale: 0.95 }}
+                initial={{ opacity: 0, scale: 0.97 }}
                 animate={{ opacity: 1, scale: 1 }}
                 exit={{ opacity: 0 }}
                 className="flex flex-col items-center"
               >
-                <div className="h-12 w-12 rounded-xl bg-accent/10 flex items-center justify-center mb-4">
+                <div className="h-11 w-11 rounded-xl bg-accent/10 flex items-center justify-center mb-4">
                   <Upload className="h-5 w-5 text-accent" strokeWidth={1.5} />
                 </div>
                 <p className="text-sm font-medium text-accent">Drop your file here</p>
               </motion.div>
             )}
 
-            {/* Uploading */}
             {state === "uploading" && (
               <motion.div
                 key="uploading"
@@ -278,7 +292,7 @@ function UploadZone({
                 exit={{ opacity: 0 }}
                 className="flex flex-col items-center w-full max-w-xs"
               >
-                <div className="h-12 w-12 rounded-xl bg-accent/10 flex items-center justify-center mb-4">
+                <div className="h-11 w-11 rounded-xl bg-accent/10 flex items-center justify-center mb-4">
                   <Loader2 className="h-5 w-5 text-accent animate-spin" strokeWidth={1.5} />
                 </div>
                 <p className="text-sm font-medium text-foreground mb-1">
@@ -296,7 +310,6 @@ function UploadZone({
               </motion.div>
             )}
 
-            {/* Processing */}
             {state === "processing" && (
               <motion.div
                 key="processing"
@@ -305,7 +318,7 @@ function UploadZone({
                 exit={{ opacity: 0 }}
                 className="flex flex-col items-center"
               >
-                <div className="h-12 w-12 rounded-xl bg-accent/10 flex items-center justify-center mb-4">
+                <div className="h-11 w-11 rounded-xl bg-accent/10 flex items-center justify-center mb-4">
                   <Loader2 className="h-5 w-5 text-accent animate-spin" strokeWidth={1.5} />
                 </div>
                 <p className="text-sm font-medium text-foreground">{processingMessage}</p>
@@ -313,16 +326,15 @@ function UploadZone({
               </motion.div>
             )}
 
-            {/* Complete */}
             {state === "complete" && (
               <motion.div
                 key="complete"
-                initial={{ opacity: 0, scale: 0.95 }}
+                initial={{ opacity: 0, scale: 0.97 }}
                 animate={{ opacity: 1, scale: 1 }}
                 exit={{ opacity: 0 }}
                 className="flex flex-col items-center pointer-events-auto"
               >
-                <div className="h-12 w-12 rounded-xl bg-[hsl(var(--success-soft))] flex items-center justify-center mb-4">
+                <div className="h-11 w-11 rounded-xl bg-[hsl(var(--success-soft))] flex items-center justify-center mb-4">
                   <Check className="h-5 w-5 text-[hsl(var(--success))]" strokeWidth={2} />
                 </div>
                 <div className="flex items-center gap-2">
@@ -352,6 +364,35 @@ function UploadZone({
   );
 }
 
+// --- Supplementary Context Field ---
+function ContextField({
+  label,
+  value,
+  onValueChange,
+  options,
+}: {
+  label: string;
+  value: string;
+  onValueChange: (v: string) => void;
+  options: string[];
+}) {
+  return (
+    <div className="space-y-1.5">
+      <label className="text-xs font-medium text-muted-foreground">{label}</label>
+      <Select value={value} onValueChange={onValueChange}>
+        <SelectTrigger className="rounded-xl bg-card border-border/60 h-10 text-sm hover:border-border transition-colors">
+          <SelectValue placeholder="Select…" />
+        </SelectTrigger>
+        <SelectContent className="rounded-xl">
+          {options.map((v) => (
+            <SelectItem key={v} value={v} className="text-sm">{v}</SelectItem>
+          ))}
+        </SelectContent>
+      </Select>
+    </div>
+  );
+}
+
 // --- Main Page ---
 const ProjectIntake = () => {
   const navigate = useNavigate();
@@ -370,6 +411,7 @@ const ProjectIntake = () => {
   const [highlightUpload, setHighlightUpload] = useState(false);
 
   const hasProgress = uploadState === "complete" || description.length > 0 || !!industry || !!productType || !!market || !!companyStage;
+  const isUploaded = uploadState === "complete";
 
   const handleBack = () => {
     if (hasProgress) {
@@ -398,7 +440,6 @@ const ProjectIntake = () => {
       return;
     }
 
-    // Simulate upload
     setUploadState("uploading");
     setProgress(0);
     let p = 0;
@@ -408,7 +449,6 @@ const ProjectIntake = () => {
         p = 100;
         clearInterval(uploadInterval);
         setProgress(100);
-        // Simulate processing
         setUploadState("processing");
         let msgIdx = 0;
         const procInterval = setInterval(() => {
@@ -450,7 +490,7 @@ const ProjectIntake = () => {
   };
 
   const handleContinue = () => {
-    if (uploadState !== "complete") {
+    if (!isUploaded) {
       setHighlightUpload(true);
       setTimeout(() => setHighlightUpload(false), 1500);
       return;
@@ -469,154 +509,147 @@ const ProjectIntake = () => {
           </header>
 
           <main className="flex-1 overflow-y-auto">
-            <div className="max-w-2xl mx-auto px-6 py-8 space-y-8">
-              {/* Back + Stage Tracker */}
-              <div className="flex items-center justify-between">
-                <button
-                  onClick={handleBack}
-                  className="flex items-center gap-1.5 text-sm text-muted-foreground hover:text-foreground transition-colors"
-                >
-                  <ArrowLeft className="h-4 w-4" strokeWidth={1.5} />
-                  Back
-                </button>
+            <div className="max-w-2xl mx-auto px-6 pt-8 pb-16">
+              {/* Back Button */}
+              <button
+                onClick={handleBack}
+                className="flex items-center gap-1.5 text-sm text-muted-foreground hover:text-foreground transition-colors mb-8 group"
+              >
+                <ArrowLeft className="h-3.5 w-3.5 group-hover:-translate-x-0.5 transition-transform" strokeWidth={1.5} />
+                Back
+              </button>
+
+              {/* Stage Tracker */}
+              <div className="mb-10">
                 <StageTracker current={0} />
               </div>
 
-              {/* Title */}
-              <div>
-                <h1 className="text-xl font-semibold tracking-tight text-foreground">
+              {/* Page Header */}
+              <div className="mb-10">
+                <h1 className="text-2xl font-semibold tracking-tight text-foreground">
                   Project Intake
                 </h1>
-                <p className="text-sm text-muted-foreground mt-1">
-                  Upload your document and provide context to get started.
+                <p className="text-sm text-muted-foreground mt-2 leading-relaxed">
+                  Upload your document and provide context to begin the design workflow.
                 </p>
               </div>
 
-              {/* Upload */}
-              <motion.div animate={highlightUpload ? { scale: [1, 1.01, 1] } : {}} transition={{ duration: 0.4 }}>
-                <UploadZone
-                  state={uploadState}
-                  errorType={errorType}
-                  fileName={fileName}
-                  progress={progress}
-                  processingMessage={processingMsg}
-                  onDrop={handleDrop}
-                  onFileSelect={handleFileSelect}
-                  onRetry={handleRetry}
-                  onRemove={handleRemove}
-                />
-              </motion.div>
+              {/* === VERTICAL FLOW === */}
+              <div className="space-y-10">
 
-              {/* Context + Metadata — revealed after upload */}
-              <AnimatePresence>
-                {uploadState === "complete" && (
-                  <motion.div
-                    initial={{ opacity: 0, height: 0 }}
-                    animate={{ opacity: 1, height: "auto" }}
-                    exit={{ opacity: 0, height: 0 }}
-                    transition={{ duration: 0.4, ease: "easeOut" }}
-                    className="space-y-8 overflow-hidden"
-                  >
-                    {/* Description */}
-                    <div className="space-y-2">
-                      <label className="text-sm font-medium text-foreground">
-                        Additional Context
-                        <span className="text-muted-foreground font-normal ml-1.5">Optional</span>
-                      </label>
-                      <Textarea
-                        value={description}
-                        onChange={(e) => setDescription(e.target.value)}
-                        placeholder="Add any additional context about your project…"
-                        className="min-h-[100px] rounded-xl resize-none bg-card border-border text-sm"
-                      />
-                      {description.length > 0 && (
-                        <p className="text-[11px] text-muted-foreground text-right">
-                          {description.length} / 2000
-                        </p>
-                      )}
-                    </div>
-
-                    {/* Supplementary Context */}
-                    <div className="space-y-3">
-                      <div>
-                        <p className="text-sm font-medium text-foreground">Supplementary Context</p>
-                        <p className="text-xs text-muted-foreground mt-0.5">
-                          This helps improve output quality
-                        </p>
-                      </div>
-                      <div className="grid grid-cols-2 gap-3">
-                        <div className="space-y-1.5">
-                          <label className="text-xs text-muted-foreground">Industry</label>
-                          <Select value={industry} onValueChange={setIndustry}>
-                            <SelectTrigger className="rounded-xl bg-card h-9 text-sm">
-                              <SelectValue placeholder="Select…" />
-                            </SelectTrigger>
-                            <SelectContent>
-                              {INDUSTRIES.map((v) => (
-                                <SelectItem key={v} value={v}>{v}</SelectItem>
-                              ))}
-                            </SelectContent>
-                          </Select>
-                        </div>
-                        <div className="space-y-1.5">
-                          <label className="text-xs text-muted-foreground">Product Type</label>
-                          <Select value={productType} onValueChange={setProductType}>
-                            <SelectTrigger className="rounded-xl bg-card h-9 text-sm">
-                              <SelectValue placeholder="Select…" />
-                            </SelectTrigger>
-                            <SelectContent>
-                              {PRODUCT_TYPES.map((v) => (
-                                <SelectItem key={v} value={v}>{v}</SelectItem>
-                              ))}
-                            </SelectContent>
-                          </Select>
-                        </div>
-                        <div className="space-y-1.5">
-                          <label className="text-xs text-muted-foreground">Market</label>
-                          <Select value={market} onValueChange={setMarket}>
-                            <SelectTrigger className="rounded-xl bg-card h-9 text-sm">
-                              <SelectValue placeholder="Select…" />
-                            </SelectTrigger>
-                            <SelectContent>
-                              {MARKETS.map((v) => (
-                                <SelectItem key={v} value={v}>{v}</SelectItem>
-                              ))}
-                            </SelectContent>
-                          </Select>
-                        </div>
-                        <div className="space-y-1.5">
-                          <label className="text-xs text-muted-foreground">Company Stage</label>
-                          <Select value={companyStage} onValueChange={setCompanyStage}>
-                            <SelectTrigger className="rounded-xl bg-card h-9 text-sm">
-                              <SelectValue placeholder="Select…" />
-                            </SelectTrigger>
-                            <SelectContent>
-                              {COMPANY_STAGES.map((v) => (
-                                <SelectItem key={v} value={v}>{v}</SelectItem>
-                              ))}
-                            </SelectContent>
-                          </Select>
-                        </div>
-                      </div>
-                    </div>
+                {/* 1. Upload Section */}
+                <section>
+                  <div className="flex items-center gap-2 mb-3">
+                    <span className="flex items-center justify-center h-5 w-5 rounded-full bg-accent/10 text-accent text-[10px] font-semibold">1</span>
+                    <h2 className="text-sm font-medium text-foreground">Upload Document</h2>
+                  </div>
+                  <motion.div animate={highlightUpload ? { scale: [1, 1.005, 1] } : {}} transition={{ duration: 0.4 }}>
+                    <UploadZone
+                      state={uploadState}
+                      errorType={errorType}
+                      fileName={fileName}
+                      progress={progress}
+                      processingMessage={processingMsg}
+                      onDrop={handleDrop}
+                      onFileSelect={handleFileSelect}
+                      onRetry={handleRetry}
+                      onRemove={handleRemove}
+                    />
                   </motion.div>
-                )}
-              </AnimatePresence>
+                </section>
 
-              {/* Primary CTA */}
-              <div className="pt-2">
-                <Button
-                  onClick={handleContinue}
-                  disabled={uploadState === "uploading" || uploadState === "processing"}
-                  className={`w-full h-11 rounded-xl text-sm font-medium transition-all ${
-                    uploadState === "complete"
-                      ? "gradient-accent text-accent-foreground hover:shadow-lg hover:shadow-accent/20"
-                      : "bg-secondary text-muted-foreground hover:bg-muted"
-                  }`}
+                {/* 2. Project Description — always visible, secondary until upload */}
+                <motion.section
+                  animate={{ opacity: isUploaded ? 1 : 0.5 }}
+                  transition={{ duration: 0.4 }}
                 >
-                  Continue to Persona Identification
-                  <ArrowRight className="h-4 w-4 ml-1" strokeWidth={1.5} />
-                </Button>
+                  <div className="flex items-center gap-2 mb-3">
+                    <span className={`flex items-center justify-center h-5 w-5 rounded-full text-[10px] font-semibold transition-colors ${
+                      isUploaded ? "bg-accent/10 text-accent" : "bg-secondary text-muted-foreground/50"
+                    }`}>2</span>
+                    <h2 className="text-sm font-medium text-foreground">Project Description</h2>
+                    <span className="text-[11px] text-muted-foreground ml-auto">Optional</span>
+                  </div>
+                  <Textarea
+                    value={description}
+                    onChange={(e) => setDescription(e.target.value)}
+                    placeholder="Describe your product, goals, or anything important for this project…"
+                    disabled={!isUploaded}
+                    className="min-h-[120px] rounded-xl resize-none bg-card border-border/60 text-sm placeholder:text-muted-foreground/60 focus:border-accent/30 transition-colors"
+                    maxLength={2000}
+                  />
+                  {description.length > 0 && (
+                    <p className="text-[11px] text-muted-foreground text-right mt-1.5">
+                      {description.length} / 2,000
+                    </p>
+                  )}
+                </motion.section>
+
+                {/* 3. Supplementary Context — always visible, secondary until upload */}
+                <motion.section
+                  animate={{ opacity: isUploaded ? 1 : 0.5 }}
+                  transition={{ duration: 0.4 }}
+                >
+                  <div className="flex items-center gap-2 mb-1">
+                    <span className={`flex items-center justify-center h-5 w-5 rounded-full text-[10px] font-semibold transition-colors ${
+                      isUploaded ? "bg-accent/10 text-accent" : "bg-secondary text-muted-foreground/50"
+                    }`}>3</span>
+                    <h2 className="text-sm font-medium text-foreground">Supplementary Context</h2>
+                  </div>
+                  <p className="text-xs text-muted-foreground mb-4 ml-7">
+                    Improves accuracy of generated personas and outputs
+                  </p>
+
+                  <div className="surface-elevated rounded-2xl p-5 shadow-soft">
+                    <div className="grid grid-cols-2 gap-4">
+                      <ContextField
+                        label="Industry"
+                        value={industry}
+                        onValueChange={setIndustry}
+                        options={INDUSTRIES}
+                      />
+                      <ContextField
+                        label="Product Type"
+                        value={productType}
+                        onValueChange={setProductType}
+                        options={PRODUCT_TYPES}
+                      />
+                      <ContextField
+                        label="Market"
+                        value={market}
+                        onValueChange={setMarket}
+                        options={MARKETS}
+                      />
+                      <ContextField
+                        label="Company Stage"
+                        value={companyStage}
+                        onValueChange={setCompanyStage}
+                        options={COMPANY_STAGES}
+                      />
+                    </div>
+                  </div>
+                </motion.section>
+
+                {/* 4. Primary CTA */}
+                <div className="pt-2">
+                  <Button
+                    onClick={handleContinue}
+                    disabled={uploadState === "uploading" || uploadState === "processing"}
+                    className={`w-full h-12 rounded-xl text-sm font-medium transition-all duration-300 ${
+                      isUploaded
+                        ? "gradient-accent text-accent-foreground shadow-soft hover:shadow-elevated hover:brightness-110"
+                        : "bg-secondary text-muted-foreground cursor-not-allowed"
+                    }`}
+                  >
+                    <span>Continue to Persona Identification</span>
+                    <ArrowRight className="h-4 w-4 ml-1.5" strokeWidth={1.5} />
+                  </Button>
+                  {!isUploaded && uploadState !== "uploading" && uploadState !== "processing" && (
+                    <p className="text-[11px] text-muted-foreground text-center mt-2">
+                      Upload a document to continue
+                    </p>
+                  )}
+                </div>
               </div>
             </div>
           </main>
