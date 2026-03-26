@@ -2,6 +2,7 @@ import { SidebarProvider, SidebarTrigger } from "@/components/ui/sidebar";
 import { AppSidebar } from "@/components/dashboard/AppSidebar";
 import { Plus, Check, Circle, Lock } from "lucide-react";
 import { motion } from "framer-motion";
+import { useNavigate } from "react-router-dom";
 
 type PhaseStatus = "done" | "in-progress" | "pending";
 
@@ -129,6 +130,7 @@ function ProjectCard({ project, index }: { project: Project; index: number }) {
 }
 
 const Projects = () => {
+  const navigate = useNavigate();
   return (
     <SidebarProvider>
       <div className="min-h-screen flex w-full bg-background">
@@ -147,6 +149,7 @@ const Projects = () => {
                 animate={{ opacity: 1, y: 0 }}
                 transition={{ duration: 0.3 }}
                 whileHover={{ scale: 1.02, y: -1 }}
+                onClick={() => navigate("/project/intake")}
                 className="surface-elevated rounded-xl px-5 py-4 shadow-soft hover:shadow-elevated transition-shadow flex items-center gap-3 group"
               >
                 <div className="h-9 w-9 rounded-lg bg-accent-soft flex items-center justify-center shrink-0 group-hover:bg-accent/10 transition-colors">
