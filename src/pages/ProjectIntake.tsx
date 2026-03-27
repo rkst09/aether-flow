@@ -506,7 +506,7 @@ const ProjectIntake = () => {
       setTimeout(() => setHighlightUpload(false), 1500);
       return;
     }
-    // Navigate to next stage
+    navigate("/project/personas");
   };
 
   return (
