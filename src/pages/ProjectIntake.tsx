@@ -548,10 +548,40 @@ const ProjectIntake = () => {
               {/* === VERTICAL FLOW === */}
               <div className="space-y-10">
 
-                {/* 1. Upload Section */}
+                {/* 1. Project Name */}
                 <section>
                   <div className="flex items-center gap-2 mb-3">
                     <span className="flex items-center justify-center h-5 w-5 rounded-full bg-accent/10 text-accent text-[10px] font-semibold">1</span>
+                    <h2 className="text-sm font-medium text-foreground">Project Name</h2>
+                    <span className="text-[11px] text-destructive ml-auto">Required</span>
+                  </div>
+                  <Input
+                    ref={nameInputRef}
+                    autoFocus
+                    value={projectName}
+                    onChange={(e) => {
+                      setProjectName(e.target.value);
+                      if (!projectNameTouched) setProjectNameTouched(true);
+                    }}
+                    onBlur={() => setProjectNameTouched(true)}
+                    placeholder="Enter your project name…"
+                    className="h-11 rounded-xl bg-card border-border/60 text-sm placeholder:text-muted-foreground/60 focus:border-accent/30 transition-colors"
+                  />
+                  {projectNameTouched && !projectName.trim() && (
+                    <motion.p
+                      initial={{ opacity: 0, y: -4 }}
+                      animate={{ opacity: 1, y: 0 }}
+                      className="text-[11px] text-destructive mt-1.5 ml-1"
+                    >
+                      Project name is required
+                    </motion.p>
+                  )}
+                </section>
+
+                {/* 2. Upload Section */}
+                <section>
+                  <div className="flex items-center gap-2 mb-3">
+                    <span className="flex items-center justify-center h-5 w-5 rounded-full bg-accent/10 text-accent text-[10px] font-semibold">2</span>
                     <h2 className="text-sm font-medium text-foreground">Upload Document</h2>
                   </div>
                   <motion.div animate={highlightUpload ? { scale: [1, 1.005, 1] } : {}} transition={{ duration: 0.4 }}>
@@ -569,7 +599,7 @@ const ProjectIntake = () => {
                   </motion.div>
                 </section>
 
-                {/* 2. Project Description — always visible, secondary until upload */}
+                {/* 3. Project Description — always visible, secondary until upload */}
                 <motion.section
                   animate={{ opacity: isUploaded ? 1 : 0.5 }}
                   transition={{ duration: 0.4 }}
@@ -577,7 +607,7 @@ const ProjectIntake = () => {
                   <div className="flex items-center gap-2 mb-3">
                     <span className={`flex items-center justify-center h-5 w-5 rounded-full text-[10px] font-semibold transition-colors ${
                       isUploaded ? "bg-accent/10 text-accent" : "bg-secondary text-muted-foreground/50"
-                    }`}>2</span>
+                    }`}>3</span>
                     <h2 className="text-sm font-medium text-foreground">Project Description</h2>
                     <span className="text-[11px] text-muted-foreground ml-auto">Optional</span>
                   </div>
@@ -596,7 +626,7 @@ const ProjectIntake = () => {
                   )}
                 </motion.section>
 
-                {/* 3. Supplementary Context — always visible, secondary until upload */}
+                {/* 4. Supplementary Context — always visible, secondary until upload */}
                 <motion.section
                   animate={{ opacity: isUploaded ? 1 : 0.5 }}
                   transition={{ duration: 0.4 }}
@@ -604,7 +634,7 @@ const ProjectIntake = () => {
                   <div className="flex items-center gap-2 mb-1">
                     <span className={`flex items-center justify-center h-5 w-5 rounded-full text-[10px] font-semibold transition-colors ${
                       isUploaded ? "bg-accent/10 text-accent" : "bg-secondary text-muted-foreground/50"
-                    }`}>3</span>
+                    }`}>4</span>
                     <h2 className="text-sm font-medium text-foreground">Supplementary Context</h2>
                   </div>
                   <p className="text-xs text-muted-foreground mb-4 ml-7">
@@ -641,13 +671,13 @@ const ProjectIntake = () => {
                   </div>
                 </motion.section>
 
-                {/* 4. Primary CTA */}
+                {/* 5. Primary CTA */}
                 <div className="pt-2">
                   <Button
                     onClick={handleContinue}
                     disabled={uploadState === "uploading" || uploadState === "processing"}
                     className={`w-full h-12 rounded-xl text-sm font-medium transition-all duration-300 ${
-                      isUploaded
+                      canContinue
                         ? "gradient-accent text-accent-foreground shadow-soft hover:shadow-elevated hover:brightness-110"
                         : "bg-secondary text-muted-foreground cursor-not-allowed"
                     }`}
@@ -655,9 +685,9 @@ const ProjectIntake = () => {
                     <span>Continue to Persona Identification</span>
                     <ArrowRight className="h-4 w-4 ml-1.5" strokeWidth={1.5} />
                   </Button>
-                  {!isUploaded && uploadState !== "uploading" && uploadState !== "processing" && (
+                  {!canContinue && uploadState !== "uploading" && uploadState !== "processing" && (
                     <p className="text-[11px] text-muted-foreground text-center mt-2">
-                      Upload a document to continue
+                      {!projectName.trim() ? "Enter a project name to continue" : "Upload a document to continue"}
                     </p>
                   )}
                 </div>
