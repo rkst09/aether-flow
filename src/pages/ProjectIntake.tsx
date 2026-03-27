@@ -15,6 +15,7 @@ import {
   RefreshCw,
 } from "lucide-react";
 import { Button } from "@/components/ui/button";
+import { Input } from "@/components/ui/input";
 import { Textarea } from "@/components/ui/textarea";
 import {
   Select,
@@ -402,6 +403,7 @@ const ProjectIntake = () => {
   const [file, setFile] = useState<File | null>(null);
   const [progress, setProgress] = useState(0);
   const [processingMsg, setProcessingMsg] = useState(PROCESSING_MESSAGES[0]);
+  const nameInputRef2 = null; // placeholder removed below
   const [description, setDescription] = useState("");
   const [industry, setIndustry] = useState("");
   const [productType, setProductType] = useState("");
@@ -409,9 +411,13 @@ const ProjectIntake = () => {
   const [companyStage, setCompanyStage] = useState("");
   const [showLeaveDialog, setShowLeaveDialog] = useState(false);
   const [highlightUpload, setHighlightUpload] = useState(false);
+  const [projectName, setProjectName] = useState("");
+  const [projectNameTouched, setProjectNameTouched] = useState(false);
+  const nameInputRef = useRef<HTMLInputElement>(null);
 
-  const hasProgress = uploadState === "complete" || description.length > 0 || !!industry || !!productType || !!market || !!companyStage;
+  const hasProgress = uploadState === "complete" || description.length > 0 || !!industry || !!productType || !!market || !!companyStage || projectName.length > 0;
   const isUploaded = uploadState === "complete";
+  const canContinue = isUploaded && projectName.trim().length > 0;
 
   const handleBack = () => {
     if (hasProgress) {
@@ -490,6 +496,11 @@ const ProjectIntake = () => {
   };
 
   const handleContinue = () => {
+    if (!projectName.trim()) {
+      setProjectNameTouched(true);
+      nameInputRef.current?.focus();
+      return;
+    }
     if (!isUploaded) {
       setHighlightUpload(true);
       setTimeout(() => setHighlightUpload(false), 1500);
