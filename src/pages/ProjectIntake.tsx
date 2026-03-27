@@ -403,7 +403,7 @@ const ProjectIntake = () => {
   const [file, setFile] = useState<File | null>(null);
   const [progress, setProgress] = useState(0);
   const [processingMsg, setProcessingMsg] = useState(PROCESSING_MESSAGES[0]);
-  const nameInputRef2 = null; // placeholder removed below
+  
   const [description, setDescription] = useState("");
   const [industry, setIndustry] = useState("");
   const [productType, setProductType] = useState("");
