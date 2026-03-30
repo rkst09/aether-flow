@@ -95,12 +95,13 @@ function PhaseIndicator({ status, index }: { status: PhaseStatus; index: number 
   );
 }
 
-function ProjectCard({ project, index }: { project: Project; index: number }) {
+function ProjectCard({ project, index, onClick }: { project: Project; index: number; onClick: () => void }) {
   const completedCount = project.phases.filter((p) => p === "done").length;
   const progress = Math.round((completedCount / 6) * 100);
 
   return (
     <motion.button
+      onClick={onClick}
       initial={{ opacity: 0, y: 12 }}
       animate={{ opacity: 1, y: 0 }}
       transition={{ delay: index * 0.06, duration: 0.35, ease: "easeOut" }}
@@ -166,7 +167,14 @@ const Projects = () => {
                 <h2 className="text-sm font-medium text-foreground">Your Projects</h2>
                 <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-4">
                   {projects.map((project, i) => (
-                    <ProjectCard key={project.name} project={project} index={i} />
+                    <ProjectCard
+                      key={project.name}
+                      project={project}
+                      index={i}
+                      onClick={() =>
+                        navigate(`/project/${project.name.toLowerCase().replace(/\s+/g, "-")}`)
+                      }
+                    />
                   ))}
                 </div>
               </section>
