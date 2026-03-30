@@ -1,5 +1,6 @@
-import { useState } from "react";
-import { useNavigate } from "react-router-dom";
+import { useState, useEffect } from "react";
+import { useNavigate, useParams } from "react-router-dom";
+import { supabase } from "@/lib/supabase";
 import { SidebarProvider, SidebarTrigger } from "@/components/ui/sidebar";
 import { AppSidebar } from "@/components/dashboard/AppSidebar";
 import { motion, AnimatePresence } from "framer-motion";
@@ -1328,8 +1329,44 @@ const SECTION_TABS: { key: SectionKey; label: string; icon: React.ElementType; g
 
 const DesignBacklog = () => {
   const navigate = useNavigate();
+  const { id: projectId } = useParams<{ id: string }>();
   const [modules, setModules] = useState<BacklogModule[]>(INITIAL_MODULES);
   const [questions, setQuestions] = useState<OpenQuestion[]>(INITIAL_QUESTIONS);
+
+  useEffect(() => {
+    if (!projectId) return;
+    supabase
+      .from("backlog_items")
+      .select("*")
+      .eq("project_id", projectId)
+      .order("sort_order", { ascending: true })
+      .then(({ data, error }) => {
+        if (!error && data && data.length > 0) {
+          // Group items by a default module
+          const items: BacklogItem[] = data.map((row) => ({
+            id: row.id,
+            featureName: row.task_name ?? "",
+            problemStatement: "",
+            personaIds: row.persona_id ? [row.persona_id] : [],
+            journeyStage: "",
+            opportunityDirection: "",
+            priority: (row.priority as Priority) ?? "Medium",
+            effort: "Medium" as Effort,
+            impact: ["Experience"] as ImpactType[],
+            dependencies: [],
+            edgeCases: [],
+          }));
+          const grouped: BacklogModule = {
+            id: "m0",
+            name: "Imported Items",
+            description: "Items loaded from project",
+            color: "#6366F1",
+            items,
+          };
+          setModules([grouped]);
+        }
+      });
+  }, [projectId]);
   const [activeSection, setActiveSection] = useState<SectionKey>("backlog");
   const [projectName, setProjectName] = useState("Aether Project");
   const [editingName, setEditingName] = useState(false);
@@ -1376,7 +1413,7 @@ const DesignBacklog = () => {
             </div>
 
             <div className="ml-auto flex items-center gap-2">
-              <Button variant="ghost" onClick={() => navigate("/project/phase/01/journey")}
+              <Button variant="ghost" onClick={() => navigate(projectId ? `/project/${projectId}/phase/01/journey` : "/dashboard")}
                 className="h-8 rounded-lg text-xs gap-1.5 px-3 text-muted-foreground hover:text-foreground hidden sm:flex">
                 <ArrowLeft className="h-3 w-3" strokeWidth={1.5} />
                 Back to Journey Mapping
@@ -1390,7 +1427,12 @@ const DesignBacklog = () => {
               </Button>
 
               <Button
-                onClick={() => navigate("/project/phase/02")}
+                onClick={async () => {
+                  if (projectId) {
+                    await supabase.from("projects").update({ current_phase: 4, updated_at: new Date().toISOString() }).eq("id", projectId);
+                  }
+                  navigate(projectId ? `/project/${projectId}/phase/02` : "/dashboard");
+                }}
                 className="h-8 rounded-lg text-xs gap-1.5 px-3 gradient-accent text-accent-foreground hover:brightness-110 shadow-soft">
                 Proceed to Screen Derivation
                 <ArrowRight className="h-3.5 w-3.5" strokeWidth={1.5} />
@@ -1513,7 +1555,12 @@ const DesignBacklog = () => {
                 Export Excel
               </Button>
               <Button
-                onClick={() => navigate("/project/phase/02")}
+                onClick={async () => {
+                  if (projectId) {
+                    await supabase.from("projects").update({ current_phase: 4, updated_at: new Date().toISOString() }).eq("id", projectId);
+                  }
+                  navigate(projectId ? `/project/${projectId}/phase/02` : "/dashboard");
+                }}
                 className="h-10 rounded-xl text-sm gap-1.5 gradient-accent text-accent-foreground hover:brightness-110 shadow-soft">
                 Proceed to Screen Derivation
                 <ArrowRight className="h-4 w-4" strokeWidth={1.5} />

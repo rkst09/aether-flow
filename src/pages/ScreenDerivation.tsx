@@ -1,5 +1,6 @@
-import { useState, useMemo } from "react";
-import { useNavigate } from "react-router-dom";
+import { useState, useMemo, useEffect } from "react";
+import { useNavigate, useParams } from "react-router-dom";
+import { supabase } from "@/lib/supabase";
 import { motion, AnimatePresence } from "framer-motion";
 import {
   ArrowRight, ArrowLeft, ChevronDown, ChevronRight,
@@ -1130,7 +1131,46 @@ function exportMapToPDF() {
 
 const ScreenDerivation = () => {
   const navigate = useNavigate();
+  const { id: projectId } = useParams<{ id: string }>();
   const [modules,     setModules]     = useState<ScreenModule[]>(INITIAL_MODULES);
+
+  useEffect(() => {
+    if (!projectId) return;
+    supabase
+      .from("screens")
+      .select("*")
+      .eq("project_id", projectId)
+      .order("sort_order", { ascending: true })
+      .then(({ data, error }) => {
+        if (!error && data && data.length > 0) {
+          // Group into a single module
+          const screens = data.map((row) => ({
+            id: row.id,
+            name: row.name ?? "",
+            type: (row.type ?? "Action") as ScreenType,
+            purpose: "",
+            personas: row.persona_id ? [row.persona_id] : [],
+            journeyStage: "",
+            backlogRef: row.id,
+            shared: false,
+            complexity: "Medium" as Complexity,
+            entryPoints: Array.isArray(row.entry_points) ? row.entry_points : [],
+            exitPoints: Array.isArray(row.exit_points) ? row.exit_points : [],
+            componentHints: Array.isArray(row.component_hints) ? row.component_hints : [],
+            states: ["Loading", "Empty", "Error"] as ScreenState[],
+            warning: undefined,
+          }));
+          setModules([{
+            id: "m0",
+            name: "Screens",
+            color: "#6366F1",
+            bg: "#EEF2FF",
+            dot: "#6366F1",
+            screens,
+          }]);
+        }
+      });
+  }, [projectId]);
   const [projectName, setProjectName] = useState("Aether Platform");
   const [activeTab,   setActiveTab]   = useState("list");
   const [listFilter,  setListFilter]  = useState<"all" | "shared" | "exclusive">("all");
@@ -1174,7 +1214,7 @@ const ScreenDerivation = () => {
             </div>
 
             <div className="ml-auto flex items-center gap-2 shrink-0">
-              <Button variant="ghost" size="sm" onClick={() => navigate("/project/phase/01/backlog")}
+              <Button variant="ghost" size="sm" onClick={() => navigate(projectId ? `/project/${projectId}/phase/01/backlog` : "/dashboard")}
                 className="h-8 rounded-lg text-xs gap-1.5">
                 <ArrowLeft className="h-3.5 w-3.5" strokeWidth={1.5} />
                 Back to Design Backlog
@@ -1204,7 +1244,7 @@ const ScreenDerivation = () => {
                   </DropdownMenuItem>
                 </DropdownMenuContent>
               </DropdownMenu>
-              <Button size="sm" onClick={() => navigate("/project/phase/03")}
+              <Button size="sm" onClick={async () => { if (projectId) { await supabase.from("projects").update({ current_phase: 5, updated_at: new Date().toISOString() }).eq("id", projectId); } navigate(projectId ? `/project/${projectId}/phase/03` : "/dashboard"); }}
                 className="h-8 rounded-lg text-xs gap-1.5 gradient-accent text-accent-foreground hover:brightness-110 shadow-soft">
                 Proceed to Prototype
                 <ArrowRight className="h-3.5 w-3.5" strokeWidth={1.5} />
@@ -1351,7 +1391,7 @@ const ScreenDerivation = () => {
                   </DropdownMenuContent>
                 </DropdownMenu>
                 <Button
-                  onClick={() => navigate("/project/phase/03")}
+                  onClick={async () => { if (projectId) { await supabase.from("projects").update({ current_phase: 5, updated_at: new Date().toISOString() }).eq("id", projectId); } navigate(projectId ? `/project/${projectId}/phase/03` : "/dashboard"); }}
                   className="h-10 rounded-xl text-sm gap-1.5 gradient-accent text-accent-foreground hover:brightness-110 shadow-soft"
                 >
                   Confirm Screen List & Proceed to Phase 03

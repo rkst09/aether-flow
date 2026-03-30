@@ -1,5 +1,6 @@
 import { useState, useRef } from "react";
-import { useNavigate } from "react-router-dom";
+import { useNavigate, useParams } from "react-router-dom";
+import { supabase } from "@/lib/supabase";
 import { motion, AnimatePresence } from "framer-motion";
 import {
   ArrowLeft, ArrowRight, ChevronDown, ChevronRight,
@@ -224,6 +225,11 @@ function exportSummaryPDF(screens: ScreenAudit[]) {
   <table><thead><tr><th>Screen</th><th>Category</th><th>Severity</th><th>Issue</th><th>Recommendation</th></tr></thead><tbody>${rows}</tbody></table>
   </body></html>`);
   win.document.close(); win.focus(); setTimeout(() => win.print(), 300);
+}
+
+function exportAuditJson(screens: ScreenAudit[]) {
+  const data = { version: "1.0", generated: new Date().toISOString(), screens };
+  downloadBlob(JSON.stringify(data, null, 2), "Aether_UX_Audit.json", "application/json");
 }
 
 // ─── Stage Tracker ────────────────────────────────────────────────────────────
@@ -530,6 +536,7 @@ function UploadZone({
 
 const UXAudit = () => {
   const navigate = useNavigate();
+  const { id: routeProjectId } = useParams<{ id: string }>();
 
   // Mode & setup
   const [mode,        setMode]        = useState<Mode>("project");
@@ -585,7 +592,7 @@ const UXAudit = () => {
             <span className="text-xs text-muted-foreground hidden md:block">— UX Audit</span>
 
             <div className="ml-auto flex items-center gap-2 shrink-0">
-              <Button variant="ghost" size="sm" onClick={() => navigate("/project/phase/03")}
+              <Button variant="ghost" size="sm" onClick={() => navigate(routeProjectId ? `/project/${routeProjectId}/phase/03` : "/dashboard")}
                 className="h-8 rounded-lg text-xs gap-1.5">
                 <ArrowLeft className="h-3.5 w-3.5" strokeWidth={1.5} />
                 Back to Prototype
@@ -616,7 +623,7 @@ const UXAudit = () => {
 
               <Button
                 size="sm"
-                onClick={auditPhase === "setup" ? handleRunAudit : () => navigate("/project/phase/05")}
+                onClick={auditPhase === "setup" ? handleRunAudit : async () => { if (routeProjectId) { await supabase.from("projects").update({ current_phase: 7, updated_at: new Date().toISOString() }).eq("id", routeProjectId); } navigate(routeProjectId ? `/project/${routeProjectId}/phase/05` : "/dashboard"); }}
                 disabled={auditPhase === "setup" && !canRun}
                 className={cn(
                   "h-8 rounded-lg text-xs gap-1.5",
@@ -965,7 +972,7 @@ const UXAudit = () => {
                     </DropdownMenuContent>
                   </DropdownMenu>
                   <Button
-                    onClick={() => navigate("/project/phase/05")}
+                    onClick={async () => { if (routeProjectId) { await supabase.from("projects").update({ current_phase: 7, updated_at: new Date().toISOString() }).eq("id", routeProjectId); } navigate(routeProjectId ? `/project/${routeProjectId}/phase/05` : "/dashboard"); }}
                     className="h-10 rounded-xl text-sm gap-1.5 gradient-accent text-accent-foreground hover:brightness-110 shadow-soft"
                   >
                     Proceed to UX Copywriting

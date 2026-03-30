@@ -1,5 +1,6 @@
 import { useState } from "react";
-import { useNavigate } from "react-router-dom";
+import { useNavigate, useParams } from "react-router-dom";
+import { supabase } from "@/lib/supabase";
 import { motion, AnimatePresence } from "framer-motion";
 import {
   ArrowLeft, Download, FileText, ChevronDown,
@@ -727,6 +728,7 @@ const GENERATING_LABELS = [
 
 export default function DesignDocumentation() {
   const navigate = useNavigate();
+  const { id: projectId } = useParams<{ id: string }>();
 
   const [docPhase,      setDocPhase]      = useState<DocPhase>("preview");
   const [activePersona, setActivePersona] = useState(MOCK_DOC[0].id);
@@ -739,11 +741,30 @@ export default function DesignDocumentation() {
 
   function handleGenerate() {
     setDocPhase("generating");
+    if (projectId) {
+      supabase.from("agent_runs").insert({
+        project_id: projectId, phase: 6, status: "running",
+        input_json: { personas: MOCK_DOC.length, completeness },
+      });
+    }
     let i = 0;
     const iv = setInterval(() => {
       i++;
       if (i < GENERATING_LABELS.length) setGenLabel(i);
-      else { clearInterval(iv); setTimeout(() => setDocPhase("complete"), 300); }
+      else {
+        clearInterval(iv);
+        setTimeout(async () => {
+          setDocPhase("complete");
+          if (projectId) {
+            await supabase.from("projects")
+              .update({ status: "completed", current_phase: 9, updated_at: new Date().toISOString() })
+              .eq("id", projectId);
+            await supabase.from("agent_runs")
+              .update({ status: "completed", output_json: { screens: PROJECT.screens, personas: PROJECT.personas } })
+              .eq("project_id", projectId).eq("phase", 6);
+          }
+        }, 300);
+      }
     }, 380);
   }
 
@@ -768,7 +789,7 @@ export default function DesignDocumentation() {
             </div>
             <div className="flex items-center gap-2 flex-shrink-0">
               {(docPhase === "preview" || docPhase === "complete") && <ExportMenu size="sm" />}
-              <Button variant="ghost" size="sm" className="h-8 rounded-lg text-xs gap-1.5" onClick={() => navigate("/project/phase/05")}>
+              <Button variant="ghost" size="sm" className="h-8 rounded-lg text-xs gap-1.5" onClick={() => navigate(projectId ? `/project/${projectId}/phase/05` : "/dashboard")}>
                 <ArrowLeft className="h-3.5 w-3.5" strokeWidth={1.5} />
                 <span className="hidden sm:inline">UX Copywriting</span>
               </Button>
@@ -842,7 +863,7 @@ export default function DesignDocumentation() {
                             </div>
                           </div>
                           <div className="flex items-center gap-2 flex-shrink-0">
-                            <Button variant="ghost" size="sm" className="h-8 rounded-lg text-xs gap-1.5 text-emerald-700 dark:text-emerald-400 hover:bg-emerald-100 dark:hover:bg-emerald-900/30" onClick={() => navigate("/")}>
+                            <Button variant="ghost" size="sm" className="h-8 rounded-lg text-xs gap-1.5 text-emerald-700 dark:text-emerald-400 hover:bg-emerald-100 dark:hover:bg-emerald-900/30" onClick={() => navigate("/dashboard")}>
                               <LayoutGrid className="h-3.5 w-3.5" strokeWidth={1.5} />Dashboard
                             </Button>
                             <ExportMenu size="sm" />
@@ -1006,7 +1027,7 @@ export default function DesignDocumentation() {
                   <p className="text-xs text-muted-foreground">Project saved · All phases complete · Ready for handoff</p>
                 </div>
                 <div className="flex items-center gap-2 flex-shrink-0">
-                  <Button variant="ghost" size="sm" className="h-9 rounded-xl text-xs gap-1.5" onClick={() => navigate("/")}>
+                  <Button variant="ghost" size="sm" className="h-9 rounded-xl text-xs gap-1.5" onClick={() => navigate("/dashboard")}>
                     <LayoutGrid className="h-3.5 w-3.5" strokeWidth={1.5} />Go to Dashboard
                   </Button>
                   <ExportMenu size="default" />

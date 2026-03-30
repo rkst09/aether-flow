@@ -1,4 +1,4 @@
-import { LayoutDashboard, FolderKanban, Sliders, ChevronDown } from "lucide-react";
+import { LayoutDashboard, FolderKanban, ChevronDown, LogOut } from "lucide-react";
 import { useLocation } from "react-router-dom";
 import { NavLink } from "@/components/NavLink";
 import {
@@ -7,19 +7,29 @@ import {
   SidebarFooter, SidebarHeader, useSidebar,
 } from "@/components/ui/sidebar";
 import { Tooltip, TooltipContent, TooltipTrigger } from "@/components/ui/tooltip";
+import {
+  DropdownMenu,
+  DropdownMenuContent,
+  DropdownMenuItem,
+  DropdownMenuTrigger,
+} from "@/components/ui/dropdown-menu";
 import { cn } from "@/lib/utils";
 import aetherLogo from "@/assets/aether-logo.png";
+import { useAuth } from "@/contexts/AuthContext";
 
 const navItems = [
-  { title: "Dashboard",     url: "/dashboard",     icon: LayoutDashboard },
-  { title: "Projects",      url: "/projects",      icon: FolderKanban    },
-  { title: "Customization", url: "/customization", icon: Sliders         },
+  { title: "Dashboard", url: "/dashboard", icon: LayoutDashboard },
+  { title: "Projects",  url: "/projects",  icon: FolderKanban    },
 ];
 
 export function AppSidebar() {
   const { state } = useSidebar();
   const { pathname } = useLocation();
+  const { user, signOut } = useAuth();
   const collapsed = state === "collapsed";
+
+  const displayName = user?.user_metadata?.name || user?.email?.split("@")[0] || "User";
+  const avatarLetter = displayName.charAt(0).toUpperCase();
 
   return (
     <Sidebar
@@ -126,24 +136,50 @@ export function AppSidebar() {
       {/* ── User Profile ──────────────────────────────────────────────── */}
       <SidebarFooter className={cn("py-4", collapsed ? "px-1" : "px-3")}>
         {collapsed ? (
-          <Tooltip>
-            <TooltipTrigger asChild>
-              <button className="flex items-center justify-center w-full py-2 rounded-lg hover:bg-[#F8FAFC] transition-colors">
-                <div className="h-7 w-7 rounded-full flex items-center justify-center" style={{ background: "#EEF2FF" }}>
-                  <span className="text-[12px] font-semibold text-[#6366F1]">R</span>
-                </div>
-              </button>
-            </TooltipTrigger>
-            <TooltipContent side="right">Rakshit</TooltipContent>
-          </Tooltip>
+          <DropdownMenu>
+            <DropdownMenuTrigger asChild>
+              <Tooltip>
+                <TooltipTrigger asChild>
+                  <button className="flex items-center justify-center w-full py-2 rounded-lg hover:bg-[#F8FAFC] transition-colors">
+                    <div className="h-7 w-7 rounded-full flex items-center justify-center" style={{ background: "#EEF2FF" }}>
+                      <span className="text-[12px] font-semibold text-[#6366F1]">{avatarLetter}</span>
+                    </div>
+                  </button>
+                </TooltipTrigger>
+                <TooltipContent side="right">{displayName}</TooltipContent>
+              </Tooltip>
+            </DropdownMenuTrigger>
+            <DropdownMenuContent side="right" align="end" className="rounded-xl min-w-[160px]">
+              <DropdownMenuItem
+                onClick={() => signOut()}
+                className="gap-2 cursor-pointer text-sm text-rose-600 focus:text-rose-600 focus:bg-rose-50"
+              >
+                <LogOut className="h-3.5 w-3.5" strokeWidth={1.75} />
+                Sign out
+              </DropdownMenuItem>
+            </DropdownMenuContent>
+          </DropdownMenu>
         ) : (
-          <button className="flex items-center gap-3 w-full px-3 py-2 rounded-lg hover:bg-[#F8FAFC] transition-colors group">
-            <div className="h-7 w-7 rounded-full flex items-center justify-center flex-shrink-0" style={{ background: "#EEF2FF" }}>
-              <span className="text-[12px] font-semibold text-[#6366F1]">R</span>
-            </div>
-            <span className="text-[13px] font-medium text-[#0F172A] flex-1 text-left">Rakshit</span>
-            <ChevronDown className="h-3.5 w-3.5 text-[#94A3B8] group-hover:text-[#64748B] transition-colors" strokeWidth={1.5} />
-          </button>
+          <DropdownMenu>
+            <DropdownMenuTrigger asChild>
+              <button className="flex items-center gap-3 w-full px-3 py-2 rounded-lg hover:bg-[#F8FAFC] transition-colors group">
+                <div className="h-7 w-7 rounded-full flex items-center justify-center flex-shrink-0" style={{ background: "#EEF2FF" }}>
+                  <span className="text-[12px] font-semibold text-[#6366F1]">{avatarLetter}</span>
+                </div>
+                <span className="text-[13px] font-medium text-[#0F172A] flex-1 text-left truncate">{displayName}</span>
+                <ChevronDown className="h-3.5 w-3.5 text-[#94A3B8] group-hover:text-[#64748B] transition-colors" strokeWidth={1.5} />
+              </button>
+            </DropdownMenuTrigger>
+            <DropdownMenuContent side="top" align="end" className="rounded-xl min-w-[160px]">
+              <DropdownMenuItem
+                onClick={() => signOut()}
+                className="gap-2 cursor-pointer text-sm text-rose-600 focus:text-rose-600 focus:bg-rose-50"
+              >
+                <LogOut className="h-3.5 w-3.5" strokeWidth={1.75} />
+                Sign out
+              </DropdownMenuItem>
+            </DropdownMenuContent>
+          </DropdownMenu>
         )}
       </SidebarFooter>
     </Sidebar>

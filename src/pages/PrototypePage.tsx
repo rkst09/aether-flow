@@ -1,5 +1,6 @@
-import { useState } from "react";
-import { useNavigate } from "react-router-dom";
+import { useState, useEffect } from "react";
+import { useNavigate, useParams } from "react-router-dom";
+import { supabase } from "@/lib/supabase";
 import { motion, AnimatePresence } from "framer-motion";
 import {
   ArrowLeft, ArrowRight,
@@ -419,6 +420,7 @@ function ExportMenu({ persona, format, verbosity, onCopy, size = "default" }: Ex
 
 const PrototypePage = () => {
   const navigate = useNavigate();
+  const { id: projectId } = useParams<{ id: string }>();
 
   const [selectedId,     setSelectedId]     = useState<string>("pm");
   const [format,         setFormat]         = useState<Format>("lovable");
@@ -473,7 +475,7 @@ const PrototypePage = () => {
             <span className="text-xs text-muted-foreground hidden md:block">— Prototype Prompts</span>
 
             <div className="ml-auto flex items-center gap-2 shrink-0">
-              <Button variant="ghost" size="sm" onClick={() => navigate("/project/phase/02")}
+              <Button variant="ghost" size="sm" onClick={() => navigate(projectId ? `/project/${projectId}/phase/02` : "/dashboard")}
                 className="h-8 rounded-lg text-xs gap-1.5">
                 <ArrowLeft className="h-3.5 w-3.5" strokeWidth={1.5} />
                 Back to Screen Derivation
@@ -481,7 +483,7 @@ const PrototypePage = () => {
 
               <ExportMenu persona={current} format={format} verbosity={verbosity} onCopy={handleCopy} size="sm" />
 
-              <Button size="sm" onClick={() => navigate("/project/phase/04")}
+              <Button size="sm" onClick={async () => { if (projectId) { await supabase.from("projects").update({ current_phase: 6, updated_at: new Date().toISOString() }).eq("id", projectId); } navigate(projectId ? `/project/${projectId}/phase/04` : "/dashboard"); }}
                 className="h-8 rounded-lg text-xs gap-1.5 gradient-accent text-accent-foreground hover:brightness-110 shadow-soft">
                 Proceed to UX Audit
                 <ArrowRight className="h-3.5 w-3.5" strokeWidth={1.5} />
@@ -719,7 +721,7 @@ const PrototypePage = () => {
               <div className="flex items-center gap-2">
                 <ExportMenu persona={current} format={format} verbosity={verbosity} onCopy={handleCopy} />
                 <Button
-                  onClick={() => navigate("/project/phase/04")}
+                  onClick={async () => { if (projectId) { await supabase.from("projects").update({ current_phase: 6, updated_at: new Date().toISOString() }).eq("id", projectId); } navigate(projectId ? `/project/${projectId}/phase/04` : "/dashboard"); }}
                   className="h-10 rounded-xl text-sm gap-1.5 gradient-accent text-accent-foreground hover:brightness-110 shadow-soft"
                 >
                   Proceed to UX Audit

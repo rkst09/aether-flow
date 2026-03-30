@@ -1,5 +1,6 @@
-import { useState, useCallback } from "react";
-import { useNavigate } from "react-router-dom";
+import { useState, useCallback, useEffect } from "react";
+import { useNavigate, useParams } from "react-router-dom";
+import { supabase } from "@/lib/supabase";
 import { SidebarProvider, SidebarTrigger } from "@/components/ui/sidebar";
 import { AppSidebar } from "@/components/dashboard/AppSidebar";
 import { motion, AnimatePresence } from "framer-motion";
@@ -491,11 +492,48 @@ function DeviceIcon({ device }: { device: string }) {
 // --- Main Page ---
 const PersonaStudio = () => {
   const navigate = useNavigate();
+  const { id: projectId } = useParams<{ id: string }>();
   const [personas, setPersonas] = useState<Persona[]>(MOCK_PERSONAS);
   const [selectedId, setSelectedId] = useState<string>(MOCK_PERSONAS[0].id);
   const [openSections, setOpenSections] = useState<Set<SectionKey>>(new Set(["identity", "goals"]));
   const [deleteDialogId, setDeleteDialogId] = useState<string | null>(null);
   const [showConfirmDialog, setShowConfirmDialog] = useState(false);
+  const [loadingPersonas, setLoadingPersonas] = useState(false);
+
+  useEffect(() => {
+    if (!projectId) return;
+    setLoadingPersonas(true);
+    supabase
+      .from("personas")
+      .select("*")
+      .eq("project_id", projectId)
+      .then(({ data, error }) => {
+        if (!error && data && data.length > 0) {
+          const mapped: Persona[] = data.map((row) => ({
+            ...MOCK_PERSONAS[0],
+            id: row.id,
+            name: row.name,
+            confidence: row.confidence_score ?? 80,
+            identity: {
+              ...MOCK_PERSONAS[0].identity,
+              role: row.role ?? "",
+            },
+            goals: {
+              ...MOCK_PERSONAS[0].goals,
+              primary: Array.isArray(row.goals) ? row.goals : [],
+            },
+            painPoints: {
+              ...MOCK_PERSONAS[0].painPoints,
+              functional: Array.isArray(row.pain_points) ? row.pain_points : [],
+            },
+            status: "review" as const,
+          }));
+          setPersonas(mapped);
+          setSelectedId(mapped[0].id);
+        }
+        setLoadingPersonas(false);
+      });
+  }, [projectId]);
 
   const selected = personas.find((p) => p.id === selectedId) || personas[0];
 
@@ -515,9 +553,15 @@ const PersonaStudio = () => {
     setDeleteDialogId(null);
   };
 
-  const handleConfirmPersonas = () => {
-    // Navigate to next stage (Journey Mapping)
+  const handleConfirmPersonas = async () => {
     setShowConfirmDialog(false);
+    if (projectId) {
+      await supabase
+        .from("projects")
+        .update({ current_phase: 2, updated_at: new Date().toISOString() })
+        .eq("id", projectId);
+      navigate(`/project/${projectId}/phase/01/journey`);
+    }
   };
 
   const allConfirmed = personas.every((p) => p.status === "confirmed");

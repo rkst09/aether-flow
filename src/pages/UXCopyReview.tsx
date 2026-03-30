@@ -1,5 +1,6 @@
 import { useState, useRef } from "react";
-import { useNavigate } from "react-router-dom";
+import { useNavigate, useParams } from "react-router-dom";
+import { supabase } from "@/lib/supabase";
 import { motion, AnimatePresence } from "framer-motion";
 import {
   ArrowLeft, ArrowRight, ChevronDown, ChevronRight,
@@ -556,6 +557,7 @@ function ToneGuideSummary() {
 
 const UXCopyReview = () => {
   const navigate = useNavigate();
+  const { id: routeProjectId } = useParams<{ id: string }>();
 
   const [mode,          setMode]          = useState<Mode>("project");
   const [projectId,     setProjectId]     = useState<string>("p1");
@@ -579,9 +581,33 @@ const UXCopyReview = () => {
       : standName.trim().length > 0 && standDesc.trim().length > 0
   );
 
-  const handleRunReview = () => {
+  const handleRunReview = async () => {
     setReviewPhase("running");
-    setTimeout(() => setReviewPhase("results"), 2500);
+    if (routeProjectId) {
+      await supabase.from("agent_runs").insert({
+        project_id: routeProjectId,
+        phase: 5,
+        status: "running",
+        input_json: { mode, inputTab, linkValue },
+      });
+    }
+    setTimeout(async () => {
+      setReviewPhase("results");
+      if (routeProjectId) {
+        await supabase.from("agent_runs")
+          .update({ status: "completed", output_json: { screens: MOCK_REVIEW } })
+          .eq("project_id", routeProjectId).eq("phase", 5);
+      }
+    }, 2500);
+  };
+
+  const handleProceed = async () => {
+    if (routeProjectId) {
+      await supabase.from("projects")
+        .update({ current_phase: 8, updated_at: new Date().toISOString() })
+        .eq("id", routeProjectId);
+    }
+    navigate(routeProjectId ? `/project/${routeProjectId}/phase/06` : "/dashboard");
   };
 
   const allItems     = getAllItems(MOCK_REVIEW);
@@ -606,7 +632,7 @@ const UXCopyReview = () => {
             <span className="text-xs text-muted-foreground hidden md:block">— UX Copywriting Review</span>
 
             <div className="ml-auto flex items-center gap-2 shrink-0">
-              <Button variant="ghost" size="sm" onClick={() => navigate("/project/phase/04")}
+              <Button variant="ghost" size="sm" onClick={() => navigate(routeProjectId ? `/project/${routeProjectId}/phase/04` : "/dashboard")}
                 className="h-8 rounded-lg text-xs gap-1.5">
                 <ArrowLeft className="h-3.5 w-3.5" strokeWidth={1.5} />
                 Back to UX Audit
@@ -635,7 +661,7 @@ const UXCopyReview = () => {
               )}
 
               <Button size="sm"
-                onClick={reviewPhase === "setup" ? handleRunReview : () => navigate("/project/phase/06")}
+                onClick={reviewPhase === "setup" ? handleRunReview : handleProceed}
                 disabled={reviewPhase === "setup" && !canRun}
                 className={cn("h-8 rounded-lg text-xs gap-1.5",
                   reviewPhase === "results" || canRun
@@ -931,7 +957,7 @@ const UXCopyReview = () => {
                       </DropdownMenuItem>
                     </DropdownMenuContent>
                   </DropdownMenu>
-                  <Button onClick={() => navigate("/project/phase/06")}
+                  <Button onClick={handleProceed}
                     className="h-10 rounded-xl text-sm gap-1.5 gradient-accent text-accent-foreground hover:brightness-110 shadow-soft">
                     Proceed to Documentation
                     <ArrowRight className="h-4 w-4" strokeWidth={1.5} />

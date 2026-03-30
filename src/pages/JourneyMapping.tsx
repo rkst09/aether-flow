@@ -1,5 +1,6 @@
-import { useState } from "react";
-import { useNavigate } from "react-router-dom";
+import { useState, useEffect } from "react";
+import { useNavigate, useParams } from "react-router-dom";
+import { supabase } from "@/lib/supabase";
 import { SidebarProvider, SidebarTrigger } from "@/components/ui/sidebar";
 import { AppSidebar } from "@/components/dashboard/AppSidebar";
 import { motion, AnimatePresence } from "framer-motion";
@@ -839,8 +840,29 @@ function EmptyJourney({ onGenerate }: { onGenerate: () => void }) {
 
 const JourneyMapping = () => {
   const navigate = useNavigate();
+  const { id: projectId } = useParams<{ id: string }>();
   const [activePersonaId, setActivePersonaId] = useState("1");
   const [journeys, setJourneys] = useState<Record<string, JourneyStage[]>>(INITIAL_JOURNEYS);
+
+  useEffect(() => {
+    if (!projectId) return;
+    supabase
+      .from("journey_maps")
+      .select("*")
+      .eq("project_id", projectId)
+      .then(({ data, error }) => {
+        if (!error && data && data.length > 0) {
+          const mapped: Record<string, JourneyStage[]> = {};
+          data.forEach((row) => {
+            const stages: JourneyStage[] = Array.isArray(row.stages) ? row.stages : [];
+            mapped[row.persona_id ?? row.id] = stages;
+          });
+          if (Object.keys(mapped).length > 0) {
+            setJourneys(prev => ({ ...INITIAL_JOURNEYS, ...mapped }));
+          }
+        }
+      });
+  }, [projectId]);
   const [projectName, setProjectName] = useState("Aether Project");
   const [editingName, setEditingName] = useState(false);
   const [nameDraft, setNameDraft] = useState(projectName);
@@ -931,7 +953,7 @@ const JourneyMapping = () => {
             </div>
 
             <div className="ml-auto flex items-center gap-2">
-              <Button variant="ghost" onClick={() => navigate("/project/phase/01")}
+              <Button variant="ghost" onClick={() => navigate(projectId ? `/project/${projectId}/phase/01` : "/dashboard")}
                 className="h-8 rounded-lg text-xs gap-1.5 px-3 text-muted-foreground hover:text-foreground hidden sm:flex">
                 <ArrowLeft className="h-3 w-3" strokeWidth={1.5} />
                 Back to Persona Studio
@@ -957,7 +979,7 @@ const JourneyMapping = () => {
 
               <Button
                 disabled={stages.length === 0}
-                onClick={() => navigate("/project/phase/01/backlog")}
+                onClick={() => navigate(projectId ? `/project/${projectId}/phase/01/backlog` : "/dashboard")}
                 className="h-8 rounded-lg text-xs gap-1.5 px-3 gradient-accent text-accent-foreground hover:brightness-110 shadow-soft"
               >
                 Proceed to Design Backlog
@@ -1077,7 +1099,7 @@ const JourneyMapping = () => {
               </div>
               <Button
                 disabled={stages.length === 0}
-                onClick={() => navigate("/project/phase/01/backlog")}
+                onClick={() => navigate(projectId ? `/project/${projectId}/phase/01/backlog` : "/dashboard")}
                 className="h-10 rounded-xl text-sm gap-1.5 gradient-accent text-accent-foreground hover:brightness-110 shadow-soft"
               >
                 Confirm Journey & Proceed to Design Backlog

@@ -46,14 +46,14 @@ const App = () => (
             <Route path="/projects"                 element={<P><Projects /></P>} />
             <Route path="/project/intake"           element={<P><ProjectIntake /></P>} />
             <Route path="/project/:id"              element={<P><ProjectDetail /></P>} />
-            <Route path="/project/phase/01"         element={<P><PersonaStudio /></P>} />
-            <Route path="/project/phase/01/journey" element={<P><JourneyMapping /></P>} />
-            <Route path="/project/phase/01/backlog" element={<P><DesignBacklog /></P>} />
-            <Route path="/project/phase/02"         element={<P><ScreenDerivation /></P>} />
-            <Route path="/project/phase/03"         element={<P><PrototypePage /></P>} />
-            <Route path="/project/phase/04"         element={<P><UXAudit /></P>} />
-            <Route path="/project/phase/05"         element={<P><UXCopyReview /></P>} />
-            <Route path="/project/phase/06"         element={<P><DesignDocumentation /></P>} />
+            <Route path="/project/:id/phase/01"         element={<P><PersonaStudio /></P>} />
+            <Route path="/project/:id/phase/01/journey" element={<P><JourneyMapping /></P>} />
+            <Route path="/project/:id/phase/01/backlog" element={<P><DesignBacklog /></P>} />
+            <Route path="/project/:id/phase/02"         element={<P><ScreenDerivation /></P>} />
+            <Route path="/project/:id/phase/03"         element={<P><PrototypePage /></P>} />
+            <Route path="/project/:id/phase/04"         element={<P><UXAudit /></P>} />
+            <Route path="/project/:id/phase/05"         element={<P><UXCopyReview /></P>} />
+            <Route path="/project/:id/phase/06"         element={<P><DesignDocumentation /></P>} />
 
             <Route path="*" element={<NotFound />} />
           </Routes>

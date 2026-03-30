@@ -1,4 +1,4 @@
-import { useState, useCallback, useRef } from "react";
+import { useState, useCallback, useRef, useEffect } from "react";
 import { useNavigate } from "react-router-dom";
 import { supabase } from "@/lib/supabase";
 import { useAuth } from "@/contexts/AuthContext";
@@ -419,6 +419,15 @@ const ProjectIntake = () => {
   const [projectName, setProjectName] = useState("");
   const [projectNameTouched, setProjectNameTouched] = useState(false);
   const nameInputRef = useRef<HTMLInputElement>(null);
+  const uploadIntervalRef = useRef<ReturnType<typeof setInterval> | null>(null);
+  const procIntervalRef = useRef<ReturnType<typeof setInterval> | null>(null);
+
+  useEffect(() => {
+    return () => {
+      if (uploadIntervalRef.current) clearInterval(uploadIntervalRef.current);
+      if (procIntervalRef.current) clearInterval(procIntervalRef.current);
+    };
+  }, []);
 
   const hasProgress = uploadState === "complete" || description.length > 0 || !!industry || !!productType || !!market || !!companyStage || projectName.length > 0;
   const isUploaded = uploadState === "complete";
@@ -454,18 +463,22 @@ const ProjectIntake = () => {
     setUploadState("uploading");
     setProgress(0);
     let p = 0;
-    const uploadInterval = setInterval(() => {
+    if (uploadIntervalRef.current) clearInterval(uploadIntervalRef.current);
+    if (procIntervalRef.current) clearInterval(procIntervalRef.current);
+    uploadIntervalRef.current = setInterval(() => {
       p += Math.random() * 15 + 5;
       if (p >= 100) {
         p = 100;
-        clearInterval(uploadInterval);
+        clearInterval(uploadIntervalRef.current!);
+        uploadIntervalRef.current = null;
         setProgress(100);
         setUploadState("processing");
         let msgIdx = 0;
-        const procInterval = setInterval(() => {
+        procIntervalRef.current = setInterval(() => {
           msgIdx++;
           if (msgIdx >= PROCESSING_MESSAGES.length) {
-            clearInterval(procInterval);
+            clearInterval(procIntervalRef.current!);
+            procIntervalRef.current = null;
             setUploadState("complete");
           } else {
             setProcessingMsg(PROCESSING_MESSAGES[msgIdx]);
@@ -551,7 +564,7 @@ const ProjectIntake = () => {
 
       if (dbError) throw new Error(dbError.message);
 
-      navigate(`/project/phase/01?projectId=${data.id}`);
+      navigate(`/project/${data.id}/phase/01`);
     } catch (err: unknown) {
       setSaveError(err instanceof Error ? err.message : "Something went wrong. Please try again.");
       setSaving(false);

@@ -11,7 +11,7 @@ import { ArrowRight, Plus, Search, PenLine } from "lucide-react";
 // ─── Helpers ──────────────────────────────────────────────────────────────────
 
 const PHASE_LABELS = ["Design Intake", "Screen Derivation", "Prototype", "UX Audit", "UX Copywriting", "Documentation"];
-const PHASE_ROUTES = ["/project/phase/01", "/project/phase/02", "/project/phase/03", "/project/phase/04", "/project/phase/05", "/project/phase/06"];
+const PHASE_ROUTE_SUFFIXES = ["/phase/01", "/phase/02", "/phase/03", "/phase/04", "/phase/05", "/phase/06"];
 
 function relativeTime(iso: string) {
   const diff = Date.now() - new Date(iso).getTime();
@@ -31,14 +31,14 @@ const CORE_ACTIONS = [
     title: "UX Audit",
     desc: "Evaluate usability, detect friction, and improve experience.",
     cta: "Run Audit",
-    route: "/project/phase/04",
+    routeSuffix: "/phase/04",
   },
   {
     icon: PenLine,
     title: "UX Copywriting",
     desc: "Refine microcopy for clarity, tone, and conversions.",
     cta: "Improve Copy",
-    route: "/project/phase/05",
+    routeSuffix: "/phase/05",
   },
 ];
 
@@ -153,11 +153,11 @@ const Index = () => {
                             className="text-[11px] font-semibold px-2.5 py-1 rounded-full"
                             style={{ background: "#EEF2FF", color: "#4338CA" }}
                           >
-                            Phase {String(currentProject.current_phase).padStart(2, "0")}
+                            Phase {String(currentProject.current_phase ?? 1).padStart(2, "0")}
                           </span>
                           <span className="text-[12px] text-[#94A3B8]">·</span>
                           <span className="text-[12px] text-[#94A3B8]">
-                            {PHASE_LABELS[(currentProject.current_phase - 1)] ?? "Design Intake"}
+                            {PHASE_LABELS[((currentProject.current_phase ?? 1) - 1)] ?? "Design Intake"}
                           </span>
                         </div>
 
@@ -175,9 +175,9 @@ const Index = () => {
                               key={i}
                               className="h-1 flex-1 rounded-full"
                               style={{
-                                background: i + 1 < currentProject.current_phase ? "#6366F1" :
-                                            i + 1 === currentProject.current_phase ? "#6366F1" : "#E5E7EB",
-                                opacity: i + 1 === currentProject.current_phase ? 0.5 : 1,
+                                background: i + 1 < (currentProject.current_phase ?? 1) ? "#6366F1" :
+                                            i + 1 === (currentProject.current_phase ?? 1) ? "#6366F1" : "#E5E7EB",
+                                opacity: i + 1 === (currentProject.current_phase ?? 1) ? 0.5 : 1,
                               }}
                             />
                           ))}
@@ -195,7 +195,7 @@ const Index = () => {
                           onMouseLeave={e => { e.currentTarget.style.background = "transparent"; }}
                           onClick={e => {
                             e.stopPropagation();
-                            navigate(PHASE_ROUTES[(currentProject.current_phase - 1)] ?? "/project/phase/01");
+                            navigate(`/project/${currentProject.id}${PHASE_ROUTE_SUFFIXES[(currentProject.current_phase - 1)] ?? "/phase/01"}`);
                           }}
                         >
                           Resume
@@ -204,7 +204,7 @@ const Index = () => {
                         <span className="text-[11px] text-[#94A3B8] text-right leading-snug">
                           Continue from<br />
                           <span className="text-[#64748B] font-medium">
-                            {PHASE_LABELS[(currentProject.current_phase - 1)] ?? "Design Intake"}
+                            {PHASE_LABELS[((currentProject.current_phase ?? 1) - 1)] ?? "Design Intake"}
                           </span>
                         </span>
                       </div>
@@ -233,7 +233,7 @@ const Index = () => {
                       }}
                       className="group bg-white rounded-2xl p-6 cursor-pointer"
                       style={{ border: "1px solid #E5E7EB" }}
-                      onClick={() => navigate(action.route)}
+                      onClick={() => currentProject ? navigate(`/project/${currentProject.id}${action.routeSuffix}`) : navigate("/project/intake")}
                     >
                       {/* Icon */}
                       <div
@@ -270,8 +270,8 @@ const Index = () => {
               {recentProjects.length > 0 && (
                 <motion.div {...fadeUp(0.2)} className="space-y-3">
                   <div className="flex items-center justify-between">
-                    <h2 className="text-[13px] font-semibold text-[#94A3B8] uppercase tracking-[0.08em]">
-                      Continue your work
+                    <h2 className="text-[15px] font-semibold text-[#0F172A]">
+                      Recent Projects
                     </h2>
                     <button
                       onClick={() => navigate("/projects")}
@@ -281,10 +281,11 @@ const Index = () => {
                     </button>
                   </div>
 
-                  <div className="grid grid-cols-1 sm:grid-cols-3 gap-3">
+                  <div className="grid grid-cols-1 sm:grid-cols-3 gap-4">
                     {recentProjects.map((project, i) => {
-                      const phaseLabel = PHASE_LABELS[(project.current_phase - 1)] ?? "Intake";
-                      const progress = Math.round(((project.current_phase - 1) / 6) * 100);
+                      const phase = project.current_phase ?? 1;
+                      const phaseShort = `Phase ${String(phase).padStart(2, "0")}`;
+                      const progress = Math.round(((phase - 1) / 6) * 100);
                       return (
                         <motion.div
                           key={project.id}
@@ -292,32 +293,43 @@ const Index = () => {
                           animate={{ opacity: 1, y: 0 }}
                           transition={{ duration: 0.4, delay: 0.24 + i * 0.06, ease: [0.22, 1, 0.36, 1] }}
                           whileHover={{ y: -3, boxShadow: "0 10px 28px rgba(15,23,42,0.08)" }}
-                          className="group bg-white rounded-2xl p-5 cursor-pointer"
+                          className="bg-white rounded-2xl overflow-hidden cursor-pointer"
                           style={{ border: "1px solid #E5E7EB" }}
                           onClick={() => navigate(`/project/${project.id}`)}
                         >
-                          <div className="flex items-start justify-between gap-2 mb-2">
-                            <p className="text-[14px] font-semibold text-[#0F172A] leading-snug truncate pr-1">{project.name}</p>
-                            <span
-                              className="text-[10px] font-semibold px-2 py-0.5 rounded-full shrink-0"
-                              style={{ background: "#EEF2FF", color: "#4338CA" }}
-                            >
-                              {phaseLabel}
-                            </span>
-                          </div>
-
-                          <p className="text-[12px] text-[#94A3B8] mb-4">{relativeTime(project.updated_at)}</p>
-
-                          <div className="h-[3px] w-full rounded-full" style={{ background: "#F1F5F9" }}>
+                          {/* Thumbnail */}
+                          <div
+                            className="w-full flex items-center justify-center"
+                            style={{ height: "96px", background: "#F1F5F9" }}
+                          >
                             <div
-                              className="h-full rounded-full"
-                              style={{ width: `${progress}%`, background: "#6366F1", opacity: 0.65 }}
+                              className="rounded-lg"
+                              style={{ width: "72px", height: "48px", background: "#E2E8F0" }}
                             />
                           </div>
 
-                          <div className="mt-3 flex items-center gap-1 opacity-0 group-hover:opacity-100 transition-opacity duration-150">
-                            <span className="text-[12px] font-medium" style={{ color: "#6366F1" }}>Open project</span>
-                            <ArrowRight className="h-3 w-3" style={{ color: "#6366F1" }} strokeWidth={2} />
+                          {/* Info */}
+                          <div className="p-4">
+                            <p className="text-[14px] font-semibold text-[#0F172A] truncate mb-2">
+                              {project.name}
+                            </p>
+                            <div className="flex items-center justify-between mb-3">
+                              <span className="text-[12px] text-[#94A3B8]">
+                                {relativeTime(project.updated_at)}
+                              </span>
+                              <span
+                                className="text-[11px] font-semibold px-2 py-0.5 rounded-full"
+                                style={{ background: "#EEF2FF", color: "#4338CA" }}
+                              >
+                                {phaseShort}
+                              </span>
+                            </div>
+                            <div className="h-[3px] w-full rounded-full" style={{ background: "#E5E7EB" }}>
+                              <div
+                                className="h-full rounded-full"
+                                style={{ width: `${Math.max(progress, 8)}%`, background: "#6366F1" }}
+                              />
+                            </div>
                           </div>
                         </motion.div>
                       );

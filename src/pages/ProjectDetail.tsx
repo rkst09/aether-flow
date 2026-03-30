@@ -65,72 +65,74 @@ function buildOutputs(currentPhase: number): GeneratedOutput[] {
   }));
 }
 
-const WORKFLOW_STEPS: WorkflowStep[] = [
-  {
-    number: "01",
-    title: "Define user personas",
-    description: "Extract and validate key user archetypes from your PRD",
-    status: "done",
-    meta: "3 personas confirmed",
-    route: "/project/phase/01",
-  },
-  {
-    number: "02",
-    title: "Map emotional journeys",
-    description: "Visualise how each persona moves through your product",
-    status: "done",
-    meta: "3 journey maps created",
-    route: "/project/phase/01/journey",
-  },
-  {
-    number: "03",
-    title: "Structure design tasks",
-    description: "Build a prioritised backlog from personas and journeys",
-    status: "done",
-    meta: "18 tasks in backlog",
-    route: "/project/phase/01/backlog",
-  },
-  {
-    number: "04",
-    title: "Derive product screens",
-    description: "Generate a structured screen inventory from the backlog",
-    status: "active",
-    meta: "12 screens need review",
-    route: "/project/phase/02",
-  },
-  {
-    number: "05",
-    title: "Generate builder prompts",
-    description: "Create Lovable-ready prompts for each confirmed screen",
-    status: "locked",
-    meta: null,
-    route: "/project/phase/03",
-  },
-  {
-    number: "06",
-    title: "Evaluate usability & friction",
-    description: "Run a heuristic audit across screens and user flows",
-    status: "locked",
-    meta: null,
-    route: "/project/phase/04",
-  },
-  {
-    number: "07",
-    title: "Refine microcopy & tone",
-    description: "Review and improve all product copy across screens",
-    status: "locked",
-    meta: null,
-    route: "/project/phase/05",
-  },
-  {
-    number: "08",
-    title: "Export BA handoff docs",
-    description: "Generate structured documentation ready for your dev team",
-    status: "locked",
-    meta: null,
-    route: "/project/phase/06",
-  },
-];
+function buildWorkflowSteps(projectId: string): WorkflowStep[] {
+  return [
+    {
+      number: "01",
+      title: "Define user personas",
+      description: "Extract and validate key user archetypes from your PRD",
+      status: "done",
+      meta: "3 personas confirmed",
+      route: `/project/${projectId}/phase/01`,
+    },
+    {
+      number: "02",
+      title: "Map emotional journeys",
+      description: "Visualise how each persona moves through your product",
+      status: "done",
+      meta: "3 journey maps created",
+      route: `/project/${projectId}/phase/01/journey`,
+    },
+    {
+      number: "03",
+      title: "Structure design tasks",
+      description: "Build a prioritised backlog from personas and journeys",
+      status: "done",
+      meta: "18 tasks in backlog",
+      route: `/project/${projectId}/phase/01/backlog`,
+    },
+    {
+      number: "04",
+      title: "Derive product screens",
+      description: "Generate a structured screen inventory from the backlog",
+      status: "active",
+      meta: "12 screens need review",
+      route: `/project/${projectId}/phase/02`,
+    },
+    {
+      number: "05",
+      title: "Generate builder prompts",
+      description: "Create Lovable-ready prompts for each confirmed screen",
+      status: "locked",
+      meta: null,
+      route: `/project/${projectId}/phase/03`,
+    },
+    {
+      number: "06",
+      title: "Evaluate usability & friction",
+      description: "Run a heuristic audit across screens and user flows",
+      status: "locked",
+      meta: null,
+      route: `/project/${projectId}/phase/04`,
+    },
+    {
+      number: "07",
+      title: "Refine microcopy & tone",
+      description: "Review and improve all product copy across screens",
+      status: "locked",
+      meta: null,
+      route: `/project/${projectId}/phase/05`,
+    },
+    {
+      number: "08",
+      title: "Export BA handoff docs",
+      description: "Generate structured documentation ready for your dev team",
+      status: "locked",
+      meta: null,
+      route: `/project/${projectId}/phase/06`,
+    },
+  ];
+}
 
 // ─── Animation helper ─────────────────────────────────────────────────────────
 
@@ -258,8 +260,8 @@ function StepRow({
 
 // ─── Derive workflow steps from current_phase ────────────────────────────────
 
-function buildSteps(currentPhase: number): WorkflowStep[] {
-  return WORKFLOW_STEPS.map((s, i) => {
+function buildSteps(currentPhase: number, workflowSteps: WorkflowStep[]): WorkflowStep[] {
+  return workflowSteps.map((s, i) => {
     const phase = i + 1;
     const status: StepStatus =
       phase < currentPhase  ? "done"   :
@@ -275,6 +277,7 @@ const ProjectDetail = () => {
   const { id }         = useParams<{ id: string }>();
   const [project, setProject] = useState<Project | null>(null);
   const [loading, setLoading] = useState(true);
+  const [fetchError, setFetchError] = useState<string | null>(null);
 
   useEffect(() => {
     if (!id) return;
@@ -283,13 +286,18 @@ const ProjectDetail = () => {
       .select("*")
       .eq("id", id)
       .single()
-      .then(({ data }) => {
-        setProject(data);
+      .then(({ data, error }) => {
+        if (error) {
+          setFetchError(error.message);
+        } else {
+          setProject(data);
+        }
         setLoading(false);
       });
   }, [id]);
 
-  const steps          = buildSteps(project?.current_phase ?? 1);
+  const workflowSteps  = id ? buildWorkflowSteps(id) : [];
+  const steps          = buildSteps(project?.current_phase ?? 1, workflowSteps);
   const activeStep     = steps.find((s) => s.status === "active");
   const generatedOutputs = buildOutputs(project?.current_phase ?? 1);
   const inputFiles     = project?.prd_filename
@@ -309,6 +317,28 @@ const ProjectDetail = () => {
               <div className="h-1 w-20 rounded-full overflow-hidden" style={{ background: "#E5E7EB" }}>
                 <div className="h-full rounded-full bg-[#6366F1] animate-pulse" style={{ width: "50%" }} />
               </div>
+            </div>
+          </div>
+        </div>
+      </SidebarProvider>
+    );
+  }
+
+  if (fetchError || !project) {
+    return (
+      <SidebarProvider>
+        <div className="min-h-screen flex w-full" style={{ background: "#FAFAFA" }}>
+          <AppSidebar />
+          <div className="flex-1 flex items-center justify-center">
+            <div className="flex flex-col items-center gap-4 max-w-sm text-center px-6">
+              <p className="text-[15px] font-semibold text-[#0F172A]">Could not load project</p>
+              <p className="text-[13px] text-[#64748B]">{fetchError || "Project not found."}</p>
+              <button
+                onClick={() => navigate("/projects")}
+                className="text-[13px] font-medium text-[#6366F1] hover:text-[#4338CA] transition-colors mt-2"
+              >
+                ← Back to projects
+              </button>
             </div>
           </div>
         </div>
@@ -534,7 +564,7 @@ const ProjectDetail = () => {
                     <StepRow
                       key={step.number}
                       step={step}
-                      isLast={i === WORKFLOW_STEPS.length - 1}
+                      isLast={i === steps.length - 1}
                       navigate={navigate}
                     />
                   ))}
