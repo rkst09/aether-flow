@@ -4,6 +4,7 @@ import { Eye, EyeOff, ArrowRight, Mail } from "lucide-react";
 import { motion } from "framer-motion";
 import { cn } from "@/lib/utils";
 import { useAuth } from "@/contexts/AuthContext";
+import aetherLogo from "@/assets/aether-logo.png";
 
 function GoogleIcon() {
   return (
@@ -114,8 +115,9 @@ export default function Signup() {
   return (
     <div className="min-h-screen bg-[#FAFAFA] flex flex-col items-center justify-center px-4 py-12">
 
-      <Link to="/" className="mb-8 text-[15px] font-semibold text-slate-900 hover:text-slate-700 transition-colors">
-        Aether
+      <Link to="/" className="mb-8 flex items-center gap-2.5 hover:opacity-80 transition-opacity">
+        <img src={aetherLogo} alt="Aether" className="h-8 w-8 object-contain" />
+        <span className="text-[15px] font-semibold text-slate-900">Aether</span>
       </Link>
 
       {confirmed ? (

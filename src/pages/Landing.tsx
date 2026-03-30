@@ -8,6 +8,7 @@ import {
 import aetherJourney   from "@/assets/aether-journey.png";
 import aetherPrototype from "@/assets/aether-prototype.png";
 import aetherAudit     from "@/assets/aether-audit.png";
+import aetherLogo      from "@/assets/aether-logo.png";
 
 // ─── Data ─────────────────────────────────────────────────────────────────────
 
@@ -108,7 +109,10 @@ export default function Landing() {
       {/* ── Navbar ───────────────────────────────────────────────────────── */}
       <nav className="fixed top-0 w-full z-50 bg-[#FAFAFA]/90 backdrop-blur-md border-b border-[#E4E4E7]">
         <div className="max-w-6xl mx-auto flex items-center justify-between h-[56px] px-5 sm:px-8">
-          <span className="text-[15px] font-semibold tracking-tight text-[#0F172A]">Aether</span>
+          <div className="flex items-center gap-2">
+            <img src={aetherLogo} alt="Aether" className="h-7 w-7 object-contain" />
+            <span className="text-[15px] font-semibold tracking-tight text-[#0F172A]">Aether</span>
+          </div>
           <div className="flex items-center gap-1.5">
             <button
               onClick={() => navigate("/login")}
@@ -387,7 +391,10 @@ export default function Landing() {
       {/* ── Footer ───────────────────────────────────────────────────────── */}
       <footer className="py-8 px-5 sm:px-8 border-t border-[#E4E4E7] bg-[#FAFAFA]">
         <div className="max-w-6xl mx-auto flex flex-col sm:flex-row items-center justify-between gap-2">
-          <span className="text-[14px] font-semibold text-[#0F172A]">Aether</span>
+          <div className="flex items-center gap-2">
+            <img src={aetherLogo} alt="Aether" className="h-6 w-6 object-contain" />
+            <span className="text-[14px] font-semibold text-[#0F172A]">Aether</span>
+          </div>
           <span className="text-[12px] text-[#94A3B8]">© 2026 Aether · Design Intelligence Pipeline</span>
           <div className="flex gap-6">
             {["Product", "Docs", "GitHub"].map(link => (

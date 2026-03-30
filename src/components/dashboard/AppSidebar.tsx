@@ -8,6 +8,7 @@ import {
 } from "@/components/ui/sidebar";
 import { Tooltip, TooltipContent, TooltipTrigger } from "@/components/ui/tooltip";
 import { cn } from "@/lib/utils";
+import aetherLogo from "@/assets/aether-logo.png";
 
 const navItems = [
   { title: "Dashboard",     url: "/dashboard",     icon: LayoutDashboard },
@@ -30,24 +31,24 @@ export function AppSidebar() {
       <SidebarHeader className={cn("py-5", collapsed ? "px-2" : "px-5")}>
         {!collapsed ? (
           <div className="flex items-center gap-2.5">
-            <div
-              className="h-7 w-7 rounded-lg flex items-center justify-center flex-shrink-0"
-              style={{ background: "#EEF2FF", border: "1px solid #C7D2FE" }}
-            >
-              <div className="h-3 w-3 rounded-sm bg-[#6366F1]" />
-            </div>
+            <img
+              src={aetherLogo}
+              alt="Aether"
+              className="h-7 w-7 rounded-lg object-contain flex-shrink-0"
+              style={{ background: "#EEF2FF", padding: "3px" }}
+            />
             <span className="text-[14px] font-semibold text-[#0F172A] tracking-tight">Aether</span>
           </div>
         ) : (
           <Tooltip>
             <TooltipTrigger asChild>
               <div className="flex justify-center mx-auto cursor-pointer">
-                <div
-                  className="h-7 w-7 rounded-lg flex items-center justify-center"
-                  style={{ background: "#EEF2FF", border: "1px solid #C7D2FE" }}
-                >
-                  <div className="h-3 w-3 rounded-sm bg-[#6366F1]" />
-                </div>
+                <img
+                  src={aetherLogo}
+                  alt="Aether"
+                  className="h-7 w-7 rounded-lg object-contain"
+                  style={{ background: "#EEF2FF", padding: "3px" }}
+                />
               </div>
             </TooltipTrigger>
             <TooltipContent side="right">Aether</TooltipContent>
@@ -94,7 +95,6 @@ export function AppSidebar() {
                         )}
                       >
                         <NavLink to={item.url} end className="flex items-center gap-3 px-3">
-                          {/* Active left indicator */}
                           {isActive && (
                             <span
                               className="absolute left-0 top-[7px] bottom-[7px] w-[2.5px] rounded-r-full"
@@ -129,10 +129,7 @@ export function AppSidebar() {
           <Tooltip>
             <TooltipTrigger asChild>
               <button className="flex items-center justify-center w-full py-2 rounded-lg hover:bg-[#F8FAFC] transition-colors">
-                <div
-                  className="h-7 w-7 rounded-full flex items-center justify-center"
-                  style={{ background: "#EEF2FF" }}
-                >
+                <div className="h-7 w-7 rounded-full flex items-center justify-center" style={{ background: "#EEF2FF" }}>
                   <span className="text-[12px] font-semibold text-[#6366F1]">R</span>
                 </div>
               </button>
@@ -141,10 +138,7 @@ export function AppSidebar() {
           </Tooltip>
         ) : (
           <button className="flex items-center gap-3 w-full px-3 py-2 rounded-lg hover:bg-[#F8FAFC] transition-colors group">
-            <div
-              className="h-7 w-7 rounded-full flex items-center justify-center flex-shrink-0"
-              style={{ background: "#EEF2FF" }}
-            >
+            <div className="h-7 w-7 rounded-full flex items-center justify-center flex-shrink-0" style={{ background: "#EEF2FF" }}>
               <span className="text-[12px] font-semibold text-[#6366F1]">R</span>
             </div>
             <span className="text-[13px] font-medium text-[#0F172A] flex-1 text-left">Rakshit</span>

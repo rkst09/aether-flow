@@ -2,6 +2,7 @@ import { useEffect, useState } from "react";
 import { SidebarProvider, SidebarTrigger } from "@/components/ui/sidebar";
 import { AppSidebar } from "@/components/dashboard/AppSidebar";
 import { Plus, Check, Circle, ArrowRight, Upload, Users, Map, Layout, Sparkles, BookOpen } from "lucide-react";
+import aetherLogo from "@/assets/aether-logo.png";
 import { motion } from "framer-motion";
 import { useNavigate } from "react-router-dom";
 import { supabase } from "@/lib/supabase";
@@ -151,10 +152,14 @@ function EmptyState({ onStart }: { onStart: () => void }) {
         initial={{ scale: 0.8, opacity: 0 }}
         animate={{ scale: 1, opacity: 1 }}
         transition={{ delay: 0.1, duration: 0.4, ease: [0.22, 1, 0.36, 1] }}
-        className="h-14 w-14 rounded-2xl flex items-center justify-center mb-6"
-        style={{ background: "#EEF2FF", border: "1.5px solid #C7D2FE" }}
+        className="mb-6"
       >
-        <div className="h-6 w-6 rounded-md bg-[#6366F1]" />
+        <img
+          src={aetherLogo}
+          alt="Aether"
+          className="h-14 w-14 object-contain rounded-2xl"
+          style={{ background: "#EEF2FF", padding: "10px" }}
+        />
       </motion.div>
 
       <motion.h2
