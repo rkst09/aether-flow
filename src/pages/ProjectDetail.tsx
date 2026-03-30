@@ -1,5 +1,8 @@
-import { useNavigate } from "react-router-dom";
+import { useNavigate, useParams } from "react-router-dom";
+import { useEffect, useState } from "react";
 import { motion } from "framer-motion";
+import { supabase } from "@/lib/supabase";
+import type { Project } from "@/lib/database.types";
 import { SidebarProvider, SidebarTrigger } from "@/components/ui/sidebar";
 import { AppSidebar } from "@/components/dashboard/AppSidebar";
 import {
@@ -31,28 +34,36 @@ interface GeneratedOutput {
   status: "ready" | "pending";
 }
 
-// ─── Mock data ────────────────────────────────────────────────────────────────
+// ─── Helpers ──────────────────────────────────────────────────────────────────
 
-const PROJECT = {
-  name: "Housewise",
-  description:
-    "A property discovery platform that helps first-time homebuyers navigate the Australian real estate market with confidence. The system integrates listings, emotional guidance, and expert tools in a single cohesive experience.",
-  tags: ["PropTech", "Mobile + Web", "Consumer"],
-  lastUpdated: "2 hours ago",
-};
+function relativeTime(iso: string) {
+  const diff = Date.now() - new Date(iso).getTime();
+  const m = Math.floor(diff / 60000);
+  const h = Math.floor(m / 60);
+  const d = Math.floor(h / 24);
+  if (m < 1) return "just now";
+  if (m < 60) return `${m}m ago`;
+  if (h < 24) return `${h}h ago`;
+  if (d < 7) return `${d}d ago`;
+  return new Date(iso).toLocaleDateString("en-AU", { day: "numeric", month: "short" });
+}
 
-const INPUT_FILES: InputFile[] = [
-  { name: "Housewise_PRD_v2.pdf", size: "2.4 MB", uploaded: "Mar 28, 2026" },
+const OUTPUT_PHASES = [
+  { name: "Personas",          phase: 1 },
+  { name: "Journey Maps",      phase: 2 },
+  { name: "Design Backlog",    phase: 3 },
+  { name: "Screen List",       phase: 4 },
+  { name: "Prototype Prompts", phase: 5 },
+  { name: "Documentation",     phase: 8 },
 ];
 
-const GENERATED_OUTPUTS: GeneratedOutput[] = [
-  { name: "Personas",          count: 3,    status: "ready"   },
-  { name: "Journey Maps",      count: 3,    status: "ready"   },
-  { name: "Design Backlog",    count: 18,   status: "ready"   },
-  { name: "Screen List",       count: null, status: "pending" },
-  { name: "Prototype Prompts", count: null, status: "pending" },
-  { name: "Documentation",     count: null, status: "pending" },
-];
+function buildOutputs(currentPhase: number): GeneratedOutput[] {
+  return OUTPUT_PHASES.map(o => ({
+    name:   o.name,
+    count:  null,
+    status: currentPhase > o.phase ? "ready" : "pending",
+  }));
+}
 
 const WORKFLOW_STEPS: WorkflowStep[] = [
   {
@@ -245,11 +256,65 @@ function StepRow({
   );
 }
 
+// ─── Derive workflow steps from current_phase ────────────────────────────────
+
+function buildSteps(currentPhase: number): WorkflowStep[] {
+  return WORKFLOW_STEPS.map((s, i) => {
+    const phase = i + 1;
+    const status: StepStatus =
+      phase < currentPhase  ? "done"   :
+      phase === currentPhase ? "active" : "locked";
+    return { ...s, status };
+  });
+}
+
 // ─── Page ─────────────────────────────────────────────────────────────────────
 
 const ProjectDetail = () => {
-  const navigate = useNavigate();
-  const activeStep = WORKFLOW_STEPS.find((s) => s.status === "active");
+  const navigate       = useNavigate();
+  const { id }         = useParams<{ id: string }>();
+  const [project, setProject] = useState<Project | null>(null);
+  const [loading, setLoading] = useState(true);
+
+  useEffect(() => {
+    if (!id) return;
+    supabase
+      .from("projects")
+      .select("*")
+      .eq("id", id)
+      .single()
+      .then(({ data }) => {
+        setProject(data);
+        setLoading(false);
+      });
+  }, [id]);
+
+  const steps          = buildSteps(project?.current_phase ?? 1);
+  const activeStep     = steps.find((s) => s.status === "active");
+  const generatedOutputs = buildOutputs(project?.current_phase ?? 1);
+  const inputFiles     = project?.prd_filename
+    ? [{ name: project.prd_filename, size: "—", uploaded: new Date(project.created_at).toLocaleDateString("en-AU", { day: "numeric", month: "short", year: "numeric" }) }]
+    : [];
+
+  if (loading) {
+    return (
+      <SidebarProvider>
+        <div className="min-h-screen flex w-full" style={{ background: "#FAFAFA" }}>
+          <AppSidebar />
+          <div className="flex-1 flex items-center justify-center">
+            <div className="flex flex-col items-center gap-4">
+              <div className="h-10 w-10 rounded-xl flex items-center justify-center" style={{ background: "#EEF2FF", border: "1.5px solid #C7D2FE" }}>
+                <div className="h-4 w-4 rounded-sm bg-[#6366F1]" />
+              </div>
+              <div className="h-1 w-20 rounded-full overflow-hidden" style={{ background: "#E5E7EB" }}>
+                <div className="h-full rounded-full bg-[#6366F1] animate-pulse" style={{ width: "50%" }} />
+              </div>
+            </div>
+          </div>
+        </div>
+      </SidebarProvider>
+    );
+  }
 
   return (
     <SidebarProvider>
@@ -288,10 +353,10 @@ const ProjectDetail = () => {
                 <div className="flex items-center justify-between gap-6">
                   <div>
                     <h1 className="text-[28px] font-bold text-[#0F172A] tracking-tight leading-tight">
-                      {PROJECT.name}
+                      {project?.name}
                     </h1>
                     <p className="text-[13px] text-[#94A3B8] mt-1">
-                      Last updated {PROJECT.lastUpdated}
+                      Last updated {project ? relativeTime(project.updated_at) : "—"}
                     </p>
                   </div>
 
@@ -323,10 +388,12 @@ const ProjectDetail = () => {
                     Project context
                   </p>
                   <p className="text-[14px] leading-relaxed" style={{ color: "#475569" }}>
-                    {PROJECT.description}
+                    {project?.description || "No description provided."}
                   </p>
                   <div className="flex flex-wrap gap-2 mt-4">
-                    {PROJECT.tags.map(tag => (
+                    {[project?.domain, project?.product_type, project?.market]
+                      .filter(Boolean)
+                      .map(tag => (
                       <span
                         key={tag}
                         className="text-[11px] font-medium px-2.5 py-1 rounded-full"
@@ -364,8 +431,11 @@ const ProjectDetail = () => {
                       Documents and assets provided by you
                     </p>
 
+                    {inputFiles.length === 0 && (
+                      <p className="text-[13px]" style={{ color: "#94A3B8" }}>No files uploaded yet.</p>
+                    )}
                     <div className="space-y-2.5">
-                      {INPUT_FILES.map(file => (
+                      {inputFiles.map(file => (
                         <div
                           key={file.name}
                           className="flex items-center gap-3 p-3 rounded-xl"
@@ -407,7 +477,7 @@ const ProjectDetail = () => {
                     </p>
 
                     <div className="space-y-3">
-                      {GENERATED_OUTPUTS.map(output => (
+                      {generatedOutputs.map(output => (
                         <div key={output.name} className="flex items-center justify-between">
                           <div className="flex items-center gap-2.5">
                             <div
@@ -460,7 +530,7 @@ const ProjectDetail = () => {
                   className="bg-white rounded-[20px] px-7 pt-7 pb-4"
                   style={{ border: "1px solid #E5E7EB" }}
                 >
-                  {WORKFLOW_STEPS.map((step, i) => (
+                  {steps.map((step, i) => (
                     <StepRow
                       key={step.number}
                       step={step}

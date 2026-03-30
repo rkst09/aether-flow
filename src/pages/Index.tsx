@@ -1,24 +1,29 @@
 import { useNavigate } from "react-router-dom";
+import { useEffect, useState } from "react";
 import { motion } from "framer-motion";
+import { supabase } from "@/lib/supabase";
+import { useAuth } from "@/contexts/AuthContext";
+import type { Project } from "@/lib/database.types";
 import { SidebarProvider, SidebarTrigger } from "@/components/ui/sidebar";
 import { AppSidebar } from "@/components/dashboard/AppSidebar";
 import { ArrowRight, Plus, Search, PenLine } from "lucide-react";
 
-// ─── Mock data ────────────────────────────────────────────────────────────────
+// ─── Helpers ──────────────────────────────────────────────────────────────────
 
-const CURRENT_PROJECT = {
-  name: "Housewise",
-  phaseNumber: "03",
-  phaseLabel: "Screen Derivation",
-  lastStep: "Deriving screen inventory from user flows",
-  progress: 42,
-};
+const PHASE_LABELS = ["Design Intake", "Screen Derivation", "Prototype", "UX Audit", "UX Copywriting", "Documentation"];
+const PHASE_ROUTES = ["/project/phase/01", "/project/phase/02", "/project/phase/03", "/project/phase/04", "/project/phase/05", "/project/phase/06"];
 
-const RECENT_PROJECTS = [
-  { name: "Flick Connect", lastActivity: "5h ago", phaseLabel: "Screens", progress: 33 },
-  { name: "Coates EiN",    lastActivity: "1d ago", phaseLabel: "Intake",  progress: 16 },
-  { name: "Taskr Mobile",  lastActivity: "3d ago", phaseLabel: "Intake",  progress: 8  },
-];
+function relativeTime(iso: string) {
+  const diff = Date.now() - new Date(iso).getTime();
+  const m = Math.floor(diff / 60000);
+  const h = Math.floor(m / 60);
+  const d = Math.floor(h / 24);
+  if (m < 1) return "just now";
+  if (m < 60) return `${m}m ago`;
+  if (h < 24) return `${h}h ago`;
+  if (d < 7) return `${d}d ago`;
+  return new Date(iso).toLocaleDateString("en-AU", { day: "numeric", month: "short" });
+}
 
 const CORE_ACTIONS = [
   {
@@ -49,6 +54,22 @@ const fadeUp = (delay = 0) => ({
 
 const Index = () => {
   const navigate = useNavigate();
+  const { user } = useAuth();
+  const [projects, setProjects] = useState<Project[]>([]);
+
+  useEffect(() => {
+    if (!user) return;
+    supabase
+      .from("projects")
+      .select("*")
+      .eq("user_id", user.id)
+      .order("updated_at", { ascending: false })
+      .limit(4)
+      .then(({ data }) => setProjects(data ?? []));
+  }, [user]);
+
+  const currentProject = projects[0] ?? null;
+  const recentProjects  = projects.slice(1, 4);
 
   return (
     <SidebarProvider>
@@ -114,73 +135,83 @@ const Index = () => {
               </motion.div>
 
               {/* 3 ── Current project (SECONDARY) ────────────────────── */}
-              <motion.div {...fadeUp(0.1)}>
-                <motion.div
-                  whileHover={{ y: -2, boxShadow: "0 8px 24px rgba(15,23,42,0.07)" }}
-                  transition={{ duration: 0.2, ease: "easeOut" }}
-                  className="bg-white rounded-[20px] p-7 cursor-pointer"
-                  style={{ border: "1px solid #E5E7EB" }}
-                  onClick={() => navigate("/project/phase/02")}
-                >
-                  <div className="flex items-start justify-between gap-6">
+              {currentProject && (
+                <motion.div {...fadeUp(0.1)}>
+                  <motion.div
+                    whileHover={{ y: -2, boxShadow: "0 8px 24px rgba(15,23,42,0.07)" }}
+                    transition={{ duration: 0.2, ease: "easeOut" }}
+                    className="bg-white rounded-[20px] p-7 cursor-pointer"
+                    style={{ border: "1px solid #E5E7EB" }}
+                    onClick={() => navigate(`/project/${currentProject.id}`)}
+                  >
+                    <div className="flex items-start justify-between gap-6">
 
-                    {/* Left */}
-                    <div className="flex-1 min-w-0">
-                      <div className="flex items-center gap-2 mb-3">
-                        <span
-                          className="text-[11px] font-semibold px-2.5 py-1 rounded-full"
-                          style={{ background: "#EEF2FF", color: "#4338CA" }}
+                      {/* Left */}
+                      <div className="flex-1 min-w-0">
+                        <div className="flex items-center gap-2 mb-3">
+                          <span
+                            className="text-[11px] font-semibold px-2.5 py-1 rounded-full"
+                            style={{ background: "#EEF2FF", color: "#4338CA" }}
+                          >
+                            Phase {String(currentProject.current_phase).padStart(2, "0")}
+                          </span>
+                          <span className="text-[12px] text-[#94A3B8]">·</span>
+                          <span className="text-[12px] text-[#94A3B8]">
+                            {PHASE_LABELS[(currentProject.current_phase - 1)] ?? "Design Intake"}
+                          </span>
+                        </div>
+
+                        <h2 className="text-[18px] font-bold text-[#0F172A] tracking-tight mb-1.5">
+                          {currentProject.name}
+                        </h2>
+                        <p className="text-[13px] text-[#64748B] mb-5">
+                          Last updated {relativeTime(currentProject.updated_at)}
+                        </p>
+
+                        {/* Progress */}
+                        <div className="flex gap-1">
+                          {Array.from({ length: 6 }).map((_, i) => (
+                            <div
+                              key={i}
+                              className="h-1 flex-1 rounded-full"
+                              style={{
+                                background: i + 1 < currentProject.current_phase ? "#6366F1" :
+                                            i + 1 === currentProject.current_phase ? "#6366F1" : "#E5E7EB",
+                                opacity: i + 1 === currentProject.current_phase ? 0.5 : 1,
+                              }}
+                            />
+                          ))}
+                        </div>
+                      </div>
+
+                      {/* Right CTA */}
+                      <div className="flex flex-col items-end gap-2.5 shrink-0 pt-1">
+                        <motion.button
+                          whileHover={{ scale: 1.03 }}
+                          whileTap={{ scale: 0.97 }}
+                          className="flex items-center gap-2 px-5 py-2.5 rounded-xl text-[13.5px] font-semibold transition-colors"
+                          style={{ border: "1.5px solid #6366F1", color: "#6366F1", background: "transparent" }}
+                          onMouseEnter={e => { e.currentTarget.style.background = "#EEF2FF"; }}
+                          onMouseLeave={e => { e.currentTarget.style.background = "transparent"; }}
+                          onClick={e => {
+                            e.stopPropagation();
+                            navigate(PHASE_ROUTES[(currentProject.current_phase - 1)] ?? "/project/phase/01");
+                          }}
                         >
-                          Phase {CURRENT_PROJECT.phaseNumber}
+                          Resume
+                          <ArrowRight className="h-4 w-4" strokeWidth={2} />
+                        </motion.button>
+                        <span className="text-[11px] text-[#94A3B8] text-right leading-snug">
+                          Continue from<br />
+                          <span className="text-[#64748B] font-medium">
+                            {PHASE_LABELS[(currentProject.current_phase - 1)] ?? "Design Intake"}
+                          </span>
                         </span>
-                        <span className="text-[12px] text-[#94A3B8]">·</span>
-                        <span className="text-[12px] text-[#94A3B8]">{CURRENT_PROJECT.phaseLabel}</span>
-                      </div>
-
-                      <h2 className="text-[18px] font-bold text-[#0F172A] tracking-tight mb-1.5">
-                        {CURRENT_PROJECT.name}
-                      </h2>
-                      <p className="text-[13px] text-[#64748B] mb-5">
-                        {CURRENT_PROJECT.lastStep}
-                      </p>
-
-                      {/* Progress */}
-                      <div className="flex gap-1">
-                        {Array.from({ length: 6 }).map((_, i) => (
-                          <div
-                            key={i}
-                            className="h-1 flex-1 rounded-full"
-                            style={{
-                              background: i < 3 ? "#6366F1" : "#E5E7EB",
-                              opacity: i === 2 ? 0.55 : 1,
-                            }}
-                          />
-                        ))}
                       </div>
                     </div>
-
-                    {/* Right CTA */}
-                    <div className="flex flex-col items-end gap-2.5 shrink-0 pt-1">
-                      <motion.button
-                        whileHover={{ scale: 1.03 }}
-                        whileTap={{ scale: 0.97 }}
-                        className="flex items-center gap-2 px-5 py-2.5 rounded-xl text-[13.5px] font-semibold transition-colors"
-                        style={{ border: "1.5px solid #6366F1", color: "#6366F1", background: "transparent" }}
-                        onMouseEnter={e => { e.currentTarget.style.background = "#EEF2FF"; }}
-                        onMouseLeave={e => { e.currentTarget.style.background = "transparent"; }}
-                        onClick={e => { e.stopPropagation(); navigate("/project/phase/02"); }}
-                      >
-                        Resume
-                        <ArrowRight className="h-4 w-4" strokeWidth={2} />
-                      </motion.button>
-                      <span className="text-[11px] text-[#94A3B8] text-right leading-snug">
-                        Continue from<br />
-                        <span className="text-[#64748B] font-medium">{CURRENT_PROJECT.phaseLabel}</span>
-                      </span>
-                    </div>
-                  </div>
+                  </motion.div>
                 </motion.div>
-              </motion.div>
+              )}
 
               {/* 4 ── Core actions ────────────────────────────────────── */}
               <motion.div {...fadeUp(0.14)} className="space-y-3">
@@ -236,58 +267,64 @@ const Index = () => {
               </motion.div>
 
               {/* 5 ── Recent projects ─────────────────────────────────── */}
-              <motion.div {...fadeUp(0.2)} className="space-y-3">
-                <div className="flex items-center justify-between">
-                  <h2 className="text-[13px] font-semibold text-[#94A3B8] uppercase tracking-[0.08em]">
-                    Continue your work
-                  </h2>
-                  <button
-                    onClick={() => navigate("/projects")}
-                    className="text-[12px] font-medium text-[#6366F1] hover:text-[#4338CA] transition-colors"
-                  >
-                    View all
-                  </button>
-                </div>
-
-                <div className="grid grid-cols-1 sm:grid-cols-3 gap-3">
-                  {RECENT_PROJECTS.map((project, i) => (
-                    <motion.div
-                      key={project.name}
-                      initial={{ opacity: 0, y: 14 }}
-                      animate={{ opacity: 1, y: 0 }}
-                      transition={{ duration: 0.4, delay: 0.24 + i * 0.06, ease: [0.22, 1, 0.36, 1] }}
-                      whileHover={{ y: -3, boxShadow: "0 10px 28px rgba(15,23,42,0.08)" }}
-                      className="group bg-white rounded-2xl p-5 cursor-pointer"
-                      style={{ border: "1px solid #E5E7EB" }}
+              {recentProjects.length > 0 && (
+                <motion.div {...fadeUp(0.2)} className="space-y-3">
+                  <div className="flex items-center justify-between">
+                    <h2 className="text-[13px] font-semibold text-[#94A3B8] uppercase tracking-[0.08em]">
+                      Continue your work
+                    </h2>
+                    <button
                       onClick={() => navigate("/projects")}
+                      className="text-[12px] font-medium text-[#6366F1] hover:text-[#4338CA] transition-colors"
                     >
-                      <div className="flex items-start justify-between gap-2 mb-2">
-                        <p className="text-[14px] font-semibold text-[#0F172A] leading-snug">{project.name}</p>
-                        <span
-                          className="text-[10px] font-semibold px-2 py-0.5 rounded-full shrink-0"
-                          style={{ background: "#EEF2FF", color: "#4338CA" }}
+                      View all
+                    </button>
+                  </div>
+
+                  <div className="grid grid-cols-1 sm:grid-cols-3 gap-3">
+                    {recentProjects.map((project, i) => {
+                      const phaseLabel = PHASE_LABELS[(project.current_phase - 1)] ?? "Intake";
+                      const progress = Math.round(((project.current_phase - 1) / 6) * 100);
+                      return (
+                        <motion.div
+                          key={project.id}
+                          initial={{ opacity: 0, y: 14 }}
+                          animate={{ opacity: 1, y: 0 }}
+                          transition={{ duration: 0.4, delay: 0.24 + i * 0.06, ease: [0.22, 1, 0.36, 1] }}
+                          whileHover={{ y: -3, boxShadow: "0 10px 28px rgba(15,23,42,0.08)" }}
+                          className="group bg-white rounded-2xl p-5 cursor-pointer"
+                          style={{ border: "1px solid #E5E7EB" }}
+                          onClick={() => navigate(`/project/${project.id}`)}
                         >
-                          {project.phaseLabel}
-                        </span>
-                      </div>
+                          <div className="flex items-start justify-between gap-2 mb-2">
+                            <p className="text-[14px] font-semibold text-[#0F172A] leading-snug truncate pr-1">{project.name}</p>
+                            <span
+                              className="text-[10px] font-semibold px-2 py-0.5 rounded-full shrink-0"
+                              style={{ background: "#EEF2FF", color: "#4338CA" }}
+                            >
+                              {phaseLabel}
+                            </span>
+                          </div>
 
-                      <p className="text-[12px] text-[#94A3B8] mb-4">{project.lastActivity}</p>
+                          <p className="text-[12px] text-[#94A3B8] mb-4">{relativeTime(project.updated_at)}</p>
 
-                      <div className="h-[3px] w-full rounded-full" style={{ background: "#F1F5F9" }}>
-                        <div
-                          className="h-full rounded-full"
-                          style={{ width: `${project.progress}%`, background: "#6366F1", opacity: 0.65 }}
-                        />
-                      </div>
+                          <div className="h-[3px] w-full rounded-full" style={{ background: "#F1F5F9" }}>
+                            <div
+                              className="h-full rounded-full"
+                              style={{ width: `${progress}%`, background: "#6366F1", opacity: 0.65 }}
+                            />
+                          </div>
 
-                      <div className="mt-3 flex items-center gap-1 opacity-0 group-hover:opacity-100 transition-opacity duration-150">
-                        <span className="text-[12px] font-medium" style={{ color: "#6366F1" }}>Open project</span>
-                        <ArrowRight className="h-3 w-3" style={{ color: "#6366F1" }} strokeWidth={2} />
-                      </div>
-                    </motion.div>
-                  ))}
-                </div>
-              </motion.div>
+                          <div className="mt-3 flex items-center gap-1 opacity-0 group-hover:opacity-100 transition-opacity duration-150">
+                            <span className="text-[12px] font-medium" style={{ color: "#6366F1" }}>Open project</span>
+                            <ArrowRight className="h-3 w-3" style={{ color: "#6366F1" }} strokeWidth={2} />
+                          </div>
+                        </motion.div>
+                      );
+                    })}
+                  </div>
+                </motion.div>
+              )}
 
             </div>
           </main>

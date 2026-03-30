@@ -1,8 +1,9 @@
-import { useState } from "react";
+import { useState, useEffect } from "react";
 import { useNavigate, Link } from "react-router-dom";
 import { Eye, EyeOff, ArrowRight } from "lucide-react";
 import { motion } from "framer-motion";
 import { cn } from "@/lib/utils";
+import { useAuth } from "@/contexts/AuthContext";
 
 function GoogleIcon() {
   return (
@@ -25,81 +26,119 @@ function GitHubIcon() {
 
 export default function Login() {
   const navigate = useNavigate();
+  const { user, signIn, signInWithGoogle, signInWithGitHub } = useAuth();
 
-  const [email,      setEmail]      = useState("");
-  const [password,   setPassword]   = useState("");
-  const [showPass,   setShowPass]   = useState(false);
-  const [touched,    setTouched]    = useState({ email: false, password: false });
-  const [submitting, setSubmitting] = useState(false);
+  const [email,        setEmail]        = useState("");
+  const [password,     setPassword]     = useState("");
+  const [showPass,     setShowPass]     = useState(false);
+  const [touched,      setTouched]      = useState({ email: false, password: false });
+  const [submitting,   setSubmitting]   = useState(false);
+  const [authError,    setAuthError]    = useState("");
+  const [oauthLoading, setOauthLoading] = useState<"google" | "github" | null>(null);
+
+  useEffect(() => {
+    if (user) navigate("/dashboard", { replace: true });
+  }, [user]);
 
   const emailError    = touched.email && (!email.trim() || !/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email))
-    ? !email.trim() ? "Email is required" : "Enter a valid email address"
-    : "";
-  const passwordError = touched.password && !password
-    ? "Password is required"
-    : "";
-
+    ? (!email.trim() ? "Email is required" : "Enter a valid email address") : "";
+  const passwordError = touched.password && password.length === 0 ? "Password is required" : "";
   const isValid = /^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email) && password.length > 0;
 
-  function handleSubmit(e: React.FormEvent) {
+  async function handleSubmit(e: React.FormEvent) {
     e.preventDefault();
     setTouched({ email: true, password: true });
     if (!isValid) return;
     setSubmitting(true);
-    setTimeout(() => navigate("/dashboard"), 800);
+    setAuthError("");
+    const { error } = await signIn(email, password);
+    if (error) {
+      setAuthError(
+        error.message.includes("Invalid login")
+          ? "Incorrect email or password."
+          : error.message.includes("Email not confirmed")
+          ? "Please confirm your email before signing in."
+          : error.message
+      );
+      setSubmitting(false);
+    } else {
+      navigate("/dashboard", { replace: true });
+    }
+  }
+
+  async function handleGoogle() {
+    setOauthLoading("google");
+    const { error } = await signInWithGoogle();
+    if (error) { setAuthError(error.message); setOauthLoading(null); }
+  }
+
+  async function handleGitHub() {
+    setOauthLoading("github");
+    const { error } = await signInWithGitHub();
+    if (error) { setAuthError(error.message); setOauthLoading(null); }
   }
 
   return (
     <div className="min-h-screen bg-[#FAFAFA] flex flex-col items-center justify-center px-4 py-12">
 
-      {/* Logo */}
       <Link to="/" className="mb-8 text-[15px] font-semibold text-slate-900 hover:text-slate-700 transition-colors">
         Aether
       </Link>
 
-      {/* Card */}
       <motion.div
         initial={{ opacity: 0, y: 16 }}
         animate={{ opacity: 1, y: 0 }}
         transition={{ duration: 0.45, ease: [0.25, 0.1, 0.25, 1] }}
         className="w-full max-w-[400px] bg-white rounded-2xl border border-zinc-200 shadow-[0_2px_16px_rgba(0,0,0,0.04)] p-8 space-y-6"
       >
-
-        {/* Heading */}
         <div className="text-center space-y-1">
           <h1 className="text-[22px] font-bold text-slate-900">Welcome back</h1>
-          <p className="text-[13px] text-slate-500">Continue your design system</p>
+          <p className="text-[13px] text-slate-500">Sign in to your Aether workspace</p>
         </div>
 
-        {/* Social auth */}
+        {/* OAuth */}
         <div className="space-y-2.5">
-          <button className="w-full flex items-center justify-center gap-2.5 px-4 py-2.5 border border-zinc-200 rounded-xl bg-white hover:bg-zinc-50 hover:border-zinc-300 text-sm font-medium text-slate-700 transition-colors">
-            <GoogleIcon />
+          <button
+            onClick={handleGoogle}
+            disabled={!!oauthLoading || submitting}
+            className="w-full flex items-center justify-center gap-2.5 px-4 py-2.5 border border-zinc-200 rounded-xl bg-white hover:bg-zinc-50 hover:border-zinc-300 text-sm font-medium text-slate-700 transition-colors disabled:opacity-60 disabled:cursor-not-allowed"
+          >
+            {oauthLoading === "google"
+              ? <span className="h-4 w-4 border-2 border-slate-300 border-t-slate-600 rounded-full animate-spin" />
+              : <GoogleIcon />}
             Continue with Google
           </button>
-          <button className="w-full flex items-center justify-center gap-2.5 px-4 py-2.5 border border-zinc-200 rounded-xl bg-white hover:bg-zinc-50 hover:border-zinc-300 text-sm font-medium text-slate-700 transition-colors">
-            <GitHubIcon />
+          <button
+            onClick={handleGitHub}
+            disabled={!!oauthLoading || submitting}
+            className="w-full flex items-center justify-center gap-2.5 px-4 py-2.5 border border-zinc-200 rounded-xl bg-white hover:bg-zinc-50 hover:border-zinc-300 text-sm font-medium text-slate-700 transition-colors disabled:opacity-60 disabled:cursor-not-allowed"
+          >
+            {oauthLoading === "github"
+              ? <span className="h-4 w-4 border-2 border-slate-300 border-t-slate-600 rounded-full animate-spin" />
+              : <GitHubIcon />}
             Continue with GitHub
           </button>
         </div>
 
-        {/* Divider */}
         <div className="flex items-center gap-3">
           <div className="flex-1 h-px bg-zinc-200" />
           <span className="text-[12px] text-slate-400">or</span>
           <div className="flex-1 h-px bg-zinc-200" />
         </div>
 
-        {/* Form */}
         <form onSubmit={handleSubmit} className="space-y-4">
+          {authError && (
+            <div className="text-[12px] text-rose-600 bg-rose-50 border border-rose-100 rounded-xl px-3.5 py-2.5">
+              {authError}
+            </div>
+          )}
 
-          {/* Email */}
           <div className="space-y-1.5">
             <label className="block text-[13px] font-medium text-slate-700">Email</label>
             <input
               type="email"
               value={email}
-              onChange={e => setEmail(e.target.value)}
+              onChange={e => { setEmail(e.target.value); setAuthError(""); }}
               onBlur={() => setTouched(t => ({ ...t, email: true }))}
               placeholder="you@company.com"
               className={cn(
@@ -111,7 +150,6 @@ export default function Login() {
             {emailError && <p className="text-[12px] text-rose-500">{emailError}</p>}
           </div>
 
-          {/* Password */}
           <div className="space-y-1.5">
             <div className="flex items-center justify-between">
               <label className="block text-[13px] font-medium text-slate-700">Password</label>
@@ -123,7 +161,7 @@ export default function Login() {
               <input
                 type={showPass ? "text" : "password"}
                 value={password}
-                onChange={e => { setPassword(e.target.value); if (!touched.password) setTouched(t => ({ ...t, password: true })); }}
+                onChange={e => { setPassword(e.target.value); setAuthError(""); }}
                 onBlur={() => setTouched(t => ({ ...t, password: true }))}
                 placeholder="Your password"
                 className={cn(
@@ -141,7 +179,7 @@ export default function Login() {
 
           <motion.button
             type="submit"
-            disabled={submitting}
+            disabled={submitting || !!oauthLoading}
             whileHover={!submitting ? { scale: 1.01 } : {}}
             whileTap={!submitting ? { scale: 0.98 } : {}}
             className={cn(
@@ -158,19 +196,17 @@ export default function Login() {
                 Signing in…
               </span>
             ) : (
-              <>Log In <ArrowRight className="h-4 w-4" strokeWidth={2} /></>
+              <>Sign In <ArrowRight className="h-4 w-4" strokeWidth={2} /></>
             )}
           </motion.button>
         </form>
 
-        {/* Footer link */}
         <p className="text-center text-[13px] text-slate-500">
           Don't have an account?{" "}
           <Link to="/signup" className="font-medium text-indigo-600 hover:text-indigo-700 transition-colors">
             Sign up
           </Link>
         </p>
-
       </motion.div>
     </div>
   );

@@ -1,8 +1,9 @@
-import { useState } from "react";
+import { useState, useEffect } from "react";
 import { useNavigate, Link } from "react-router-dom";
-import { Eye, EyeOff, ArrowRight } from "lucide-react";
+import { Eye, EyeOff, ArrowRight, Mail } from "lucide-react";
 import { motion } from "framer-motion";
 import { cn } from "@/lib/utils";
+import { useAuth } from "@/contexts/AuthContext";
 
 function GoogleIcon() {
   return (
@@ -23,152 +24,222 @@ function GitHubIcon() {
   );
 }
 
+function ConfirmEmail({ email }: { email: string }) {
+  return (
+    <motion.div
+      initial={{ opacity: 0, scale: 0.97 }}
+      animate={{ opacity: 1, scale: 1 }}
+      transition={{ duration: 0.35, ease: [0.25, 0.1, 0.25, 1] }}
+      className="w-full max-w-[400px] bg-white rounded-2xl border border-zinc-200 shadow-[0_2px_16px_rgba(0,0,0,0.04)] p-8 text-center space-y-5"
+    >
+      <div className="flex justify-center">
+        <div className="h-14 w-14 rounded-2xl bg-indigo-50 border border-indigo-100 flex items-center justify-center">
+          <Mail className="h-6 w-6 text-indigo-500" strokeWidth={1.5} />
+        </div>
+      </div>
+      <div className="space-y-1.5">
+        <h2 className="text-[20px] font-bold text-slate-900">Check your email</h2>
+        <p className="text-[13px] text-slate-500 leading-relaxed">
+          We sent a confirmation link to<br />
+          <span className="font-medium text-slate-700">{email}</span>
+        </p>
+      </div>
+      <p className="text-[12px] text-slate-400">
+        Click the link in the email to activate your account, then{" "}
+        <Link to="/login" className="text-indigo-600 hover:text-indigo-700 font-medium transition-colors">
+          sign in
+        </Link>
+        .
+      </p>
+    </motion.div>
+  );
+}
+
 export default function Signup() {
   const navigate = useNavigate();
+  const { user, signUp, signInWithGoogle, signInWithGitHub } = useAuth();
 
-  const [email,      setEmail]      = useState("");
-  const [password,   setPassword]   = useState("");
-  const [showPass,   setShowPass]   = useState(false);
-  const [touched,    setTouched]    = useState({ email: false, password: false });
-  const [submitting, setSubmitting] = useState(false);
+  const [email,        setEmail]        = useState("");
+  const [password,     setPassword]     = useState("");
+  const [showPass,     setShowPass]     = useState(false);
+  const [touched,      setTouched]      = useState({ email: false, password: false });
+  const [submitting,   setSubmitting]   = useState(false);
+  const [authError,    setAuthError]    = useState("");
+  const [confirmed,    setConfirmed]    = useState(false);
+  const [oauthLoading, setOauthLoading] = useState<"google" | "github" | null>(null);
 
-  const emailError    = touched.email && (!email.trim() || !/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email))
-    ? !email.trim() ? "Email is required" : "Enter a valid email address"
-    : "";
+  useEffect(() => {
+    if (user) navigate("/dashboard", { replace: true });
+  }, [user]);
+
+  const emailError = touched.email && (!email.trim() || !/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email))
+    ? (!email.trim() ? "Email is required" : "Enter a valid email address") : "";
   const passwordError = touched.password && password.length < 8
-    ? password.length === 0 ? "Password is required" : "Password must be at least 8 characters"
-    : "";
-
+    ? (password.length === 0 ? "Password is required" : "Password must be at least 8 characters") : "";
   const isValid = /^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email) && password.length >= 8;
 
-  function handleSubmit(e: React.FormEvent) {
+  async function handleSubmit(e: React.FormEvent) {
     e.preventDefault();
     setTouched({ email: true, password: true });
     if (!isValid) return;
     setSubmitting(true);
-    setTimeout(() => navigate("/dashboard"), 800);
+    setAuthError("");
+    const { error, needsConfirmation } = await signUp(email, password);
+    if (error) {
+      setAuthError(
+        error.message.includes("already registered")
+          ? "An account with this email already exists."
+          : error.message
+      );
+      setSubmitting(false);
+    } else if (needsConfirmation) {
+      setConfirmed(true);
+    } else {
+      navigate("/dashboard", { replace: true });
+    }
+  }
+
+  async function handleGoogle() {
+    setOauthLoading("google");
+    const { error } = await signInWithGoogle();
+    if (error) { setAuthError(error.message); setOauthLoading(null); }
+  }
+
+  async function handleGitHub() {
+    setOauthLoading("github");
+    const { error } = await signInWithGitHub();
+    if (error) { setAuthError(error.message); setOauthLoading(null); }
   }
 
   return (
     <div className="min-h-screen bg-[#FAFAFA] flex flex-col items-center justify-center px-4 py-12">
 
-      {/* Logo */}
       <Link to="/" className="mb-8 text-[15px] font-semibold text-slate-900 hover:text-slate-700 transition-colors">
         Aether
       </Link>
 
-      {/* Card */}
-      <motion.div
-        initial={{ opacity: 0, y: 16 }}
-        animate={{ opacity: 1, y: 0 }}
-        transition={{ duration: 0.45, ease: [0.25, 0.1, 0.25, 1] }}
-        className="w-full max-w-[400px] bg-white rounded-2xl border border-zinc-200 shadow-[0_2px_16px_rgba(0,0,0,0.04)] p-8 space-y-6"
-      >
-
-        {/* Heading */}
-        <div className="text-center space-y-1">
-          <h1 className="text-[22px] font-bold text-slate-900">Create your account</h1>
-          <p className="text-[13px] text-slate-500">Start building your product system</p>
-        </div>
-
-        {/* Social auth */}
-        <div className="space-y-2.5">
-          <button className="w-full flex items-center justify-center gap-2.5 px-4 py-2.5 border border-zinc-200 rounded-xl bg-white hover:bg-zinc-50 hover:border-zinc-300 text-sm font-medium text-slate-700 transition-colors">
-            <GoogleIcon />
-            Continue with Google
-          </button>
-          <button className="w-full flex items-center justify-center gap-2.5 px-4 py-2.5 border border-zinc-200 rounded-xl bg-white hover:bg-zinc-50 hover:border-zinc-300 text-sm font-medium text-slate-700 transition-colors">
-            <GitHubIcon />
-            Continue with GitHub
-          </button>
-        </div>
-
-        {/* Divider */}
-        <div className="flex items-center gap-3">
-          <div className="flex-1 h-px bg-zinc-200" />
-          <span className="text-[12px] text-slate-400">or</span>
-          <div className="flex-1 h-px bg-zinc-200" />
-        </div>
-
-        {/* Form */}
-        <form onSubmit={handleSubmit} className="space-y-4">
-
-          {/* Email */}
-          <div className="space-y-1.5">
-            <label className="block text-[13px] font-medium text-slate-700">Email</label>
-            <input
-              type="email"
-              value={email}
-              onChange={e => setEmail(e.target.value)}
-              onBlur={() => setTouched(t => ({ ...t, email: true }))}
-              placeholder="you@company.com"
-              className={cn(
-                "w-full rounded-xl border bg-white px-3.5 py-2.5 text-sm text-slate-900 placeholder:text-slate-400",
-                "focus:outline-none focus:ring-2 focus:ring-indigo-500/20 focus:border-indigo-400 transition-all",
-                emailError ? "border-rose-300 focus:border-rose-400 focus:ring-rose-500/20" : "border-zinc-200",
-              )}
-            />
-            {emailError && <p className="text-[12px] text-rose-500">{emailError}</p>}
+      {confirmed ? (
+        <ConfirmEmail email={email} />
+      ) : (
+        <motion.div
+          initial={{ opacity: 0, y: 16 }}
+          animate={{ opacity: 1, y: 0 }}
+          transition={{ duration: 0.45, ease: [0.25, 0.1, 0.25, 1] }}
+          className="w-full max-w-[400px] bg-white rounded-2xl border border-zinc-200 shadow-[0_2px_16px_rgba(0,0,0,0.04)] p-8 space-y-6"
+        >
+          <div className="text-center space-y-1">
+            <h1 className="text-[22px] font-bold text-slate-900">Create your account</h1>
+            <p className="text-[13px] text-slate-500">Start building your product system</p>
           </div>
 
-          {/* Password */}
-          <div className="space-y-1.5">
-            <label className="block text-[13px] font-medium text-slate-700">Password</label>
-            <div className="relative">
+          <div className="space-y-2.5">
+            <button
+              onClick={handleGoogle}
+              disabled={!!oauthLoading || submitting}
+              className="w-full flex items-center justify-center gap-2.5 px-4 py-2.5 border border-zinc-200 rounded-xl bg-white hover:bg-zinc-50 hover:border-zinc-300 text-sm font-medium text-slate-700 transition-colors disabled:opacity-60 disabled:cursor-not-allowed"
+            >
+              {oauthLoading === "google"
+                ? <span className="h-4 w-4 border-2 border-slate-300 border-t-slate-600 rounded-full animate-spin" />
+                : <GoogleIcon />}
+              Continue with Google
+            </button>
+            <button
+              onClick={handleGitHub}
+              disabled={!!oauthLoading || submitting}
+              className="w-full flex items-center justify-center gap-2.5 px-4 py-2.5 border border-zinc-200 rounded-xl bg-white hover:bg-zinc-50 hover:border-zinc-300 text-sm font-medium text-slate-700 transition-colors disabled:opacity-60 disabled:cursor-not-allowed"
+            >
+              {oauthLoading === "github"
+                ? <span className="h-4 w-4 border-2 border-slate-300 border-t-slate-600 rounded-full animate-spin" />
+                : <GitHubIcon />}
+              Continue with GitHub
+            </button>
+          </div>
+
+          <div className="flex items-center gap-3">
+            <div className="flex-1 h-px bg-zinc-200" />
+            <span className="text-[12px] text-slate-400">or</span>
+            <div className="flex-1 h-px bg-zinc-200" />
+          </div>
+
+          <form onSubmit={handleSubmit} className="space-y-4">
+            {authError && (
+              <div className="text-[12px] text-rose-600 bg-rose-50 border border-rose-100 rounded-xl px-3.5 py-2.5">
+                {authError}
+              </div>
+            )}
+
+            <div className="space-y-1.5">
+              <label className="block text-[13px] font-medium text-slate-700">Email</label>
               <input
-                type={showPass ? "text" : "password"}
-                value={password}
-                onChange={e => { setPassword(e.target.value); if (!touched.password) setTouched(t => ({ ...t, password: true })); }}
-                onBlur={() => setTouched(t => ({ ...t, password: true }))}
-                placeholder="Min. 8 characters"
+                type="email"
+                value={email}
+                onChange={e => { setEmail(e.target.value); setAuthError(""); }}
+                onBlur={() => setTouched(t => ({ ...t, email: true }))}
+                placeholder="you@company.com"
                 className={cn(
-                  "w-full rounded-xl border bg-white px-3.5 py-2.5 pr-10 text-sm text-slate-900 placeholder:text-slate-400",
+                  "w-full rounded-xl border bg-white px-3.5 py-2.5 text-sm text-slate-900 placeholder:text-slate-400",
                   "focus:outline-none focus:ring-2 focus:ring-indigo-500/20 focus:border-indigo-400 transition-all",
-                  passwordError ? "border-rose-300 focus:border-rose-400 focus:ring-rose-500/20" : "border-zinc-200",
+                  emailError ? "border-rose-300 focus:border-rose-400 focus:ring-rose-500/20" : "border-zinc-200",
                 )}
               />
-              <button type="button" onClick={() => setShowPass(s => !s)} className="absolute right-3 top-1/2 -translate-y-1/2 text-slate-400 hover:text-slate-600 transition-colors">
-                {showPass ? <EyeOff className="h-4 w-4" strokeWidth={1.5} /> : <Eye className="h-4 w-4" strokeWidth={1.5} />}
-              </button>
+              {emailError && <p className="text-[12px] text-rose-500">{emailError}</p>}
             </div>
-            {passwordError && <p className="text-[12px] text-rose-500">{passwordError}</p>}
-          </div>
 
-          <motion.button
-            type="submit"
-            disabled={submitting}
-            whileHover={!submitting ? { scale: 1.01 } : {}}
-            whileTap={!submitting ? { scale: 0.98 } : {}}
-            className={cn(
-              "w-full flex items-center justify-center gap-2 py-2.5 rounded-xl text-sm font-medium text-white transition-all mt-2",
-              submitting ? "bg-indigo-400 cursor-not-allowed" : "bg-[#6366F1] hover:bg-[#4F46E5]"
-            )}
-          >
-            {submitting ? (
-              <span className="flex items-center gap-2">
-                <svg className="animate-spin h-4 w-4" viewBox="0 0 24 24" fill="none">
-                  <circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4"/>
-                  <path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4z"/>
-                </svg>
-                Creating account…
-              </span>
-            ) : (
-              <>Create Account <ArrowRight className="h-4 w-4" strokeWidth={2} /></>
-            )}
-          </motion.button>
-        </form>
+            <div className="space-y-1.5">
+              <label className="block text-[13px] font-medium text-slate-700">Password</label>
+              <div className="relative">
+                <input
+                  type={showPass ? "text" : "password"}
+                  value={password}
+                  onChange={e => { setPassword(e.target.value); if (!touched.password) setTouched(t => ({ ...t, password: true })); }}
+                  onBlur={() => setTouched(t => ({ ...t, password: true }))}
+                  placeholder="Min. 8 characters"
+                  className={cn(
+                    "w-full rounded-xl border bg-white px-3.5 py-2.5 pr-10 text-sm text-slate-900 placeholder:text-slate-400",
+                    "focus:outline-none focus:ring-2 focus:ring-indigo-500/20 focus:border-indigo-400 transition-all",
+                    passwordError ? "border-rose-300 focus:border-rose-400 focus:ring-rose-500/20" : "border-zinc-200",
+                  )}
+                />
+                <button type="button" onClick={() => setShowPass(s => !s)} className="absolute right-3 top-1/2 -translate-y-1/2 text-slate-400 hover:text-slate-600 transition-colors">
+                  {showPass ? <EyeOff className="h-4 w-4" strokeWidth={1.5} /> : <Eye className="h-4 w-4" strokeWidth={1.5} />}
+                </button>
+              </div>
+              {passwordError && <p className="text-[12px] text-rose-500">{passwordError}</p>}
+            </div>
 
-        {/* Footer link */}
-        <p className="text-center text-[13px] text-slate-500">
-          Already have an account?{" "}
-          <Link to="/login" className="font-medium text-indigo-600 hover:text-indigo-700 transition-colors">
-            Log in
-          </Link>
-        </p>
+            <motion.button
+              type="submit"
+              disabled={submitting || !!oauthLoading}
+              whileHover={!submitting ? { scale: 1.01 } : {}}
+              whileTap={!submitting ? { scale: 0.98 } : {}}
+              className={cn(
+                "w-full flex items-center justify-center gap-2 py-2.5 rounded-xl text-sm font-medium text-white transition-all mt-2",
+                submitting ? "bg-indigo-400 cursor-not-allowed" : "bg-[#6366F1] hover:bg-[#4F46E5]"
+              )}
+            >
+              {submitting ? (
+                <span className="flex items-center gap-2">
+                  <svg className="animate-spin h-4 w-4" viewBox="0 0 24 24" fill="none">
+                    <circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4"/>
+                    <path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4z"/>
+                  </svg>
+                  Creating account…
+                </span>
+              ) : (
+                <>Create Account <ArrowRight className="h-4 w-4" strokeWidth={2} /></>
+              )}
+            </motion.button>
+          </form>
 
-      </motion.div>
+          <p className="text-center text-[13px] text-slate-500">
+            Already have an account?{" "}
+            <Link to="/login" className="font-medium text-indigo-600 hover:text-indigo-700 transition-colors">
+              Log in
+            </Link>
+          </p>
+        </motion.div>
+      )}
 
-      {/* Bottom trust line */}
       <motion.p
         initial={{ opacity: 0 }}
         animate={{ opacity: 1 }}
@@ -177,7 +248,6 @@ export default function Signup() {
       >
         By creating an account, you agree to our Terms of Service and Privacy Policy
       </motion.p>
-
     </div>
   );
 }

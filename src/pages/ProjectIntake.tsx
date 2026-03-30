@@ -1,5 +1,7 @@
 import { useState, useCallback, useRef } from "react";
 import { useNavigate } from "react-router-dom";
+import { supabase } from "@/lib/supabase";
+import { useAuth } from "@/contexts/AuthContext";
 import { SidebarProvider, SidebarTrigger } from "@/components/ui/sidebar";
 import { AppSidebar } from "@/components/dashboard/AppSidebar";
 import { motion, AnimatePresence } from "framer-motion";
@@ -397,6 +399,9 @@ function ContextField({
 // --- Main Page ---
 const ProjectIntake = () => {
   const navigate = useNavigate();
+  const { user } = useAuth();
+  const [saving, setSaving] = useState(false);
+  const [saveError, setSaveError] = useState("");
   const [uploadState, setUploadState] = useState<UploadState>("idle");
   const [errorType, setErrorType] = useState<ErrorType>(null);
   const [fileName, setFileName] = useState<string | null>(null);
@@ -495,7 +500,7 @@ const ProjectIntake = () => {
     setErrorType(null);
   };
 
-  const handleContinue = () => {
+  const handleContinue = async () => {
     if (!projectName.trim()) {
       setProjectNameTouched(true);
       nameInputRef.current?.focus();
@@ -506,7 +511,51 @@ const ProjectIntake = () => {
       setTimeout(() => setHighlightUpload(false), 1500);
       return;
     }
-    navigate("/project/personas");
+    if (!user) return;
+
+    setSaving(true);
+    setSaveError("");
+
+    try {
+      let prdUrl: string | null = null;
+      let prdFilename: string | null = null;
+
+      // Upload file to Supabase Storage
+      if (file) {
+        const path = `${user.id}/${Date.now()}_${file.name}`;
+        const { error: uploadError } = await supabase.storage
+          .from("project-files")
+          .upload(path, file);
+        if (uploadError) throw new Error(uploadError.message);
+        prdUrl = path;
+        prdFilename = file.name;
+      }
+
+      // Create project record
+      const { data, error: dbError } = await supabase
+        .from("projects")
+        .insert({
+          user_id:      user.id,
+          name:         projectName.trim(),
+          description:  description || null,
+          prd_url:      prdUrl,
+          prd_filename: prdFilename,
+          domain:       industry || null,
+          product_type: productType || null,
+          market:       market || null,
+          current_phase: 1,
+          status:       "active",
+        })
+        .select()
+        .single();
+
+      if (dbError) throw new Error(dbError.message);
+
+      navigate(`/project/phase/01?projectId=${data.id}`);
+    } catch (err: unknown) {
+      setSaveError(err instanceof Error ? err.message : "Something went wrong. Please try again.");
+      setSaving(false);
+    }
   };
 
   return (
@@ -672,21 +721,36 @@ const ProjectIntake = () => {
                 </motion.section>
 
                 {/* 5. Primary CTA */}
-                <div className="pt-2">
+                <div className="pt-2 space-y-2">
                   <Button
                     onClick={handleContinue}
-                    disabled={uploadState === "uploading" || uploadState === "processing"}
+                    disabled={uploadState === "uploading" || uploadState === "processing" || saving}
                     className={`w-full h-12 rounded-xl text-sm font-medium transition-all duration-300 ${
-                      canContinue
+                      canContinue && !saving
                         ? "gradient-accent text-accent-foreground shadow-soft hover:shadow-elevated hover:brightness-110"
                         : "bg-secondary text-muted-foreground cursor-not-allowed"
                     }`}
                   >
-                    <span>Continue to Persona Identification</span>
-                    <ArrowRight className="h-4 w-4 ml-1.5" strokeWidth={1.5} />
+                    {saving ? (
+                      <>
+                        <svg className="animate-spin h-4 w-4 mr-2" viewBox="0 0 24 24" fill="none">
+                          <circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4"/>
+                          <path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4z"/>
+                        </svg>
+                        Creating project…
+                      </>
+                    ) : (
+                      <>
+                        <span>Continue to Persona Identification</span>
+                        <ArrowRight className="h-4 w-4 ml-1.5" strokeWidth={1.5} />
+                      </>
+                    )}
                   </Button>
-                  {!canContinue && uploadState !== "uploading" && uploadState !== "processing" && (
-                    <p className="text-[11px] text-muted-foreground text-center mt-2">
+                  {saveError && (
+                    <p className="text-[12px] text-rose-500 text-center">{saveError}</p>
+                  )}
+                  {!canContinue && !saving && uploadState !== "uploading" && uploadState !== "processing" && (
+                    <p className="text-[11px] text-muted-foreground text-center">
                       {!projectName.trim() ? "Enter a project name to continue" : "Upload a document to continue"}
                     </p>
                   )}
