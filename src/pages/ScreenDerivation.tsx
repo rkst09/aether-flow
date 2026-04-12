@@ -1,6 +1,6 @@
 import { useState, useMemo, useEffect } from "react";
 import { useNavigate, useParams } from "react-router-dom";
-import { supabase } from "@/lib/supabase";
+import { runScreens, type RichScreenModule } from "@/lib/api";
 import { motion, AnimatePresence } from "framer-motion";
 import {
   ArrowRight, ArrowLeft, ChevronDown, ChevronRight,
@@ -8,7 +8,7 @@ import {
   AlertTriangle, Info, SplitSquareHorizontal,
   GitBranch, Cpu, FileText, Brain, Upload, BookOpen,
   Search, Zap, Users, Monitor, Link2, MapPin,
-  Download, FileSpreadsheet,
+  Download, FileSpreadsheet, Sparkles, RefreshCw,
 } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
@@ -70,236 +70,6 @@ const JOURNEY_STAGE_COLORS: Record<string, string> = {
   "Platform Management": "bg-slate-100 text-slate-600 dark:bg-slate-800 dark:text-slate-400",
 };
 
-const INITIAL_MODULES: ScreenModule[] = [
-  {
-    id: "m1", name: "Authentication",
-    color: "border-l-violet-400", bg: "bg-violet-500/[0.06]", dot: "bg-violet-400",
-    screens: [
-      {
-        id: "s1", name: "Sign Up", type: "Entry",
-        personas: ["p1","p2","p3"],
-        purpose: "New user account creation via email or SSO — triggers workspace initialisation",
-        journeyStage: "Discovery", backlogRef: "B-01 · User Onboarding Flow",
-        entryPoints: ["Landing page", "Invite link", "Marketing CTA"],
-        exitPoints: ["Project Setup Wizard", "Main Dashboard"],
-        componentHints: ["Form", "OAuth buttons", "Password strength", "Progress indicator"],
-        states: ["Loading","Error","Success"], complexity: "Simple", shared: true,
-      },
-      {
-        id: "s2", name: "Login", type: "Entry",
-        personas: ["p1","p2","p3","p4"],
-        purpose: "Returning user authentication with session restoration to last active context",
-        journeyStage: "Discovery", backlogRef: "B-01 · User Onboarding Flow",
-        entryPoints: ["Direct URL", "Email link", "Post sign-up redirect"],
-        exitPoints: ["Main Dashboard", "Last active project"],
-        componentHints: ["Form", "OAuth buttons", "Remember me toggle", "Error inline"],
-        states: ["Loading","Error","Success"], complexity: "Simple", shared: true,
-      },
-      {
-        id: "s3", name: "Password Reset", type: "System",
-        personas: ["p1","p2","p3","p4"],
-        purpose: "Recover account access via tokenised email link — 2-step verification flow",
-        journeyStage: "Discovery", backlogRef: "B-01 · User Onboarding Flow",
-        entryPoints: ["Login screen — forgot password link"],
-        exitPoints: ["Login screen"],
-        componentHints: ["Email input", "Confirmation banner", "Countdown timer", "Resend link"],
-        states: ["Loading","Error","Success"], complexity: "Simple", shared: true,
-      },
-    ],
-  },
-  {
-    id: "m2", name: "Dashboard & Navigation",
-    color: "border-l-blue-400", bg: "bg-blue-500/[0.06]", dot: "bg-blue-400",
-    screens: [
-      {
-        id: "s4", name: "Main Dashboard", type: "Entry",
-        personas: ["p1","p2","p3"],
-        purpose: "Central hub showing project pipeline health, phase progress, and contextual quick actions",
-        journeyStage: "Core Workflow", backlogRef: "B-02 · Dashboard Intelligence",
-        entryPoints: ["Login", "Sidebar nav — home icon"],
-        exitPoints: ["Any project", "Quick tools panel", "Files", "Customization"],
-        componentHints: ["Phase prompt cards", "Progress stepper", "Activity feed", "Quick action panel"],
-        states: ["Loading","Empty","Success"], complexity: "Complex", shared: true,
-      },
-      {
-        id: "s5", name: "Projects List", type: "Detail",
-        personas: ["p1","p2","p3"],
-        purpose: "Browse, search, and manage all workspace projects with phase-level status at a glance",
-        journeyStage: "Core Workflow", backlogRef: "B-02 · Dashboard Intelligence",
-        entryPoints: ["Sidebar nav", "Dashboard CTA"],
-        exitPoints: ["Project Detail", "New project intake"],
-        componentHints: ["Card grid", "Search bar", "Status filter", "Sort controls", "Empty state"],
-        states: ["Loading","Empty","Success"], complexity: "Medium", shared: true,
-      },
-      {
-        id: "s6", name: "Project Detail", type: "Detail",
-        personas: ["p1","p2"],
-        purpose: "Per-project overview with all 6 phase statuses, entry points, and last-run metadata",
-        journeyStage: "Core Workflow", backlogRef: "B-03 · Project Intelligence Engine",
-        entryPoints: ["Projects list — card click", "Dashboard recent projects"],
-        exitPoints: ["Any phase page", "Files", "Back to projects"],
-        componentHints: ["Phase stepper", "Progress rings", "Metadata grid", "Per-phase CTA"],
-        states: ["Loading","Error","Success"], complexity: "Medium", shared: false,
-      },
-    ],
-  },
-  {
-    id: "m3", name: "Phase 01 — Design Intake",
-    color: "border-l-emerald-400", bg: "bg-emerald-500/[0.06]", dot: "bg-emerald-400",
-    screens: [
-      {
-        id: "s7", name: "Project Intake", type: "Action",
-        personas: ["p1","p2"],
-        purpose: "PRD upload and project metadata entry — triggers AI analysis pipeline on submission",
-        journeyStage: "Onboarding", backlogRef: "B-03 · PRD Processing",
-        entryPoints: ["Dashboard new project CTA", "Projects list — new button"],
-        exitPoints: ["Persona Studio (on success)", "Projects list (on cancel)"],
-        componentHints: ["File upload dropzone", "Project name input", "Description textarea", "Upload progress", "Validation feedback"],
-        states: ["Loading","Error","Success"], complexity: "Medium", shared: false,
-      },
-      {
-        id: "s8", name: "Persona Studio", type: "Action",
-        personas: ["p1","p2"],
-        purpose: "Review and confirm AI-extracted persona candidates — inline editing, confidence scoring, status management",
-        journeyStage: "Core Workflow", backlogRef: "B-04 · Persona Identification",
-        entryPoints: ["Project Intake — on AI run completion"],
-        exitPoints: ["Journey Mapping (on confirm)"],
-        componentHints: ["Split panel", "Expandable persona cards", "Inline field editor", "Confidence bar", "Tag selector", "Accordion sections"],
-        states: ["Loading","Empty","Error","Success"], complexity: "Complex", shared: false,
-      },
-      {
-        id: "s9", name: "Journey Mapping", type: "Action",
-        personas: ["p1","p2"],
-        purpose: "Horizontal per-persona journey canvas with emotion scoring, stage editing, and opportunity identification",
-        journeyStage: "Core Workflow", backlogRef: "B-05 · Journey Mapping",
-        entryPoints: ["Persona Studio — on confirm"],
-        exitPoints: ["Design Backlog (on confirm)"],
-        componentHints: ["H-scroll stage canvas", "Emotion area chart", "Stage cards", "Opportunity impact/effort badges", "Persona pills"],
-        states: ["Loading","Empty","Error","Success"], complexity: "Complex", shared: false,
-        warning: "Multi-persona state complexity — empty state must clearly guide first-time users to add a stage",
-      },
-      {
-        id: "s10", name: "Design Backlog", type: "Action",
-        personas: ["p1","p2"],
-        purpose: "Structured design task board: backlog items, module map, flows & IA, and open questions",
-        journeyStage: "Review & Validate", backlogRef: "B-06 · Design Backlog Derivation",
-        entryPoints: ["Journey Mapping — on confirm"],
-        exitPoints: ["Screen Derivation (on proceed)"],
-        componentHints: ["4-tab workspace", "Expandable item rows", "Module map diagram", "IA tree", "Open questions list", "CSV export"],
-        states: ["Loading","Empty","Error","Success"], complexity: "Complex", shared: false,
-      },
-    ],
-  },
-  {
-    id: "m4", name: "Phase 02 — Screen Derivation",
-    color: "border-l-amber-400", bg: "bg-amber-500/[0.06]", dot: "bg-amber-400",
-    screens: [
-      {
-        id: "s11", name: "Screen Derivation Workspace", type: "Action",
-        personas: ["p1","p2"],
-        purpose: "Full product screen architecture derived from backlog modules — screen cards, relation map, shared/exclusive split",
-        journeyStage: "Review & Validate", backlogRef: "B-07 · Screen Architecture",
-        entryPoints: ["Design Backlog — proceed CTA"],
-        exitPoints: ["Prototype Prompt Generator (on confirm)"],
-        componentHints: ["3-tab workspace", "Expandable screen cards", "Relation flow map", "Shared/Exclusive filter", "Summary stat cards"],
-        states: ["Loading","Empty","Error","Success"], complexity: "Complex", shared: false,
-      },
-    ],
-  },
-  {
-    id: "m5", name: "Phase 03–06 — AI Pipeline",
-    color: "border-l-rose-400", bg: "bg-rose-500/[0.06]", dot: "bg-rose-400",
-    screens: [
-      {
-        id: "s12", name: "Prototype Prompt Generator", type: "Action",
-        personas: ["p1","p2"],
-        purpose: "Generate Lovable-ready prompts per confirmed screen — grouped by persona, copyable individually or in bulk",
-        journeyStage: "Export & Share", backlogRef: "B-08 · Prototype Prompt Generation",
-        entryPoints: ["Screen Derivation — confirm CTA"],
-        exitPoints: ["UX Audit (on proceed)"],
-        componentHints: ["Prompt cards", "One-click copy", "Bulk export button", "Persona grouping tabs", "Screen name header"],
-        states: ["Loading","Empty","Success"], complexity: "Medium", shared: false,
-      },
-      {
-        id: "s13", name: "UX Audit Report", type: "Detail",
-        personas: ["p1","p2"],
-        purpose: "Heuristic evaluation output: friction points, accessibility gaps, missing states, consistency issues — per priority",
-        journeyStage: "Review & Validate", backlogRef: "B-09 · UX Heuristic Audit",
-        entryPoints: ["Prototype Generator — proceed CTA"],
-        exitPoints: ["Copywriting Review (on proceed)"],
-        componentHints: ["Accordion issue sections", "Priority badges (High/Med/Low)", "Issue detail cards", "Severity filter", "Acknowledge CTA"],
-        states: ["Loading","Empty","Success"], complexity: "Complex", shared: false,
-        warning: "Must surface all 5 heuristic categories — missing empty + error states are the most common finding",
-      },
-      {
-        id: "s14", name: "UX Copywriting Review", type: "Action",
-        personas: ["p1","p2"],
-        purpose: "Before/after comparison for all copy: CTA labels, errors, microcopy, tooltips, empty state text",
-        journeyStage: "Review & Validate", backlogRef: "B-10 · UX Copy Review",
-        entryPoints: ["UX Audit — proceed CTA"],
-        exitPoints: ["Design Documentation (on confirm)"],
-        componentHints: ["Before/after comparison table", "Accept/reject controls", "Inline edit", "Bulk approve", "Category filter"],
-        states: ["Loading","Empty","Success"], complexity: "Medium", shared: false,
-      },
-      {
-        id: "s15", name: "Design Documentation", type: "Feedback",
-        personas: ["p1","p2"],
-        purpose: "BA-ready .docx output: screen annotations, interaction logic, edge cases, validation rules, navigation flows",
-        journeyStage: "Export & Share", backlogRef: "B-11 · BA Documentation",
-        entryPoints: ["Copywriting Review — confirm CTA"],
-        exitPoints: ["File download (on download)", "Main Dashboard (on finish)"],
-        componentHints: ["Document section preview", "Section navigation", "Download .docx button", "Share link generator"],
-        states: ["Loading","Success"], complexity: "Complex", shared: false,
-      },
-    ],
-  },
-  {
-    id: "m6", name: "Platform Tools & Settings",
-    color: "border-l-slate-400", bg: "bg-slate-500/[0.06]", dot: "bg-slate-400",
-    screens: [
-      {
-        id: "s16", name: "Files", type: "Detail",
-        personas: ["p1","p2","p3"],
-        purpose: "Manage all uploaded PRDs and AI-generated outputs for the active project — with type, size, date",
-        journeyStage: "Platform Management", backlogRef: "B-12 · File Management",
-        entryPoints: ["Sidebar nav — Files icon"],
-        exitPoints: ["Project Intake (re-upload)", "Export download"],
-        componentHints: ["File list table", "Upload zone", "File type badges", "Sort/filter controls", "Version tag"],
-        states: ["Loading","Empty","Success"], complexity: "Simple", shared: true,
-      },
-      {
-        id: "s17", name: "Customization", type: "Action",
-        personas: ["p1","p2"],
-        purpose: "Configure AI output preferences: tone (formal/conversational), persona archetypes, verbosity level",
-        journeyStage: "Platform Management", backlogRef: "B-13 · Output Customisation",
-        entryPoints: ["Sidebar nav — Customization icon"],
-        exitPoints: ["Return to previous context"],
-        componentHints: ["Toggle groups", "Radio sets", "Output preview panel", "Save confirmation toast"],
-        states: ["Success"], complexity: "Simple", shared: false,
-      },
-      {
-        id: "s18", name: "UX Audit Tool", type: "Action",
-        personas: ["p1","p2","p3"],
-        purpose: "Standalone heuristic audit — run outside the pipeline by pasting screen descriptions or a screen list",
-        journeyStage: "Platform Management", backlogRef: "B-14 · Standalone UX Tools",
-        entryPoints: ["Sidebar nav", "Dashboard quick tools panel"],
-        exitPoints: ["Audit findings view", "Export report"],
-        componentHints: ["Paste/text input area", "Audit report accordion", "Severity filter", "Export button"],
-        states: ["Loading","Empty","Success"], complexity: "Medium", shared: true,
-      },
-      {
-        id: "s19", name: "UX Copy Tool", type: "Action",
-        personas: ["p1","p2","p3"],
-        purpose: "Standalone copy review — paste any screen copy to get before/after improvement suggestions",
-        journeyStage: "Platform Management", backlogRef: "B-14 · Standalone UX Tools",
-        entryPoints: ["Sidebar nav", "Dashboard quick tools panel"],
-        exitPoints: ["Copy improvement view", "Export table"],
-        componentHints: ["Paste input area", "Before/after comparison table", "Accept/reject row controls", "Export"],
-        states: ["Loading","Empty","Success"], complexity: "Medium", shared: true,
-      },
-    ],
-  },
-];
 
 const FLOW_LANES = [
   {
@@ -441,17 +211,19 @@ function StageTracker({ current }: { current: number }) {
 }
 
 function PersonaAvatar({ id, size = "sm" }: { id: string; size?: "sm" | "xs" }) {
-  const p = PERSONAS.find(x => x.id === id);
-  if (!p) return null;
+  const p = PERSONAS.find(x => x.name === id);
   const sz = size === "xs" ? "h-5 w-5 text-[9px]" : "h-6 w-6 text-[10px]";
+  const initials = p?.initials ?? id.split(" ").map(w => w[0]).join("").slice(0, 2).toUpperCase();
+  const color = p?.color ?? "bg-muted-foreground/50";
+  const tag = p?.tag ?? "";
   return (
     <Tooltip>
       <TooltipTrigger asChild>
-        <div className={`${sz} ${p.color} rounded-full flex items-center justify-center text-white font-semibold shrink-0 ring-1 ring-background`}>
-          {p.initials}
+        <div className={`${sz} ${color} rounded-full flex items-center justify-center text-white font-semibold shrink-0 ring-1 ring-background`}>
+          {initials}
         </div>
       </TooltipTrigger>
-      <TooltipContent>{p.name} — {p.tag}</TooltipContent>
+      <TooltipContent>{id}{tag ? ` — ${tag}` : ""}</TooltipContent>
     </Tooltip>
   );
 }
@@ -647,13 +419,13 @@ function ScreenCard({
                 <p className="text-[10px] uppercase tracking-widest font-semibold text-muted-foreground">Persona Mapping</p>
                 <div className="flex flex-wrap gap-2">
                   {screen.personas.map(pid => {
-                    const p = PERSONAS.find(x => x.id === pid)!;
+                    const p = PERSONAS.find(x => x.name === pid);
                     return (
                       <div key={pid} className="flex items-center gap-1.5 text-xs bg-secondary border border-border/50 rounded-full pl-1 pr-2 py-0.5">
                         <PersonaAvatar id={pid} size="xs" />
-                        <span className="text-foreground font-medium">{p.name}</span>
-                        <span className="text-muted-foreground">·</span>
-                        <span className="text-muted-foreground">{p.tag}</span>
+                        <span className="text-foreground font-medium">{pid}</span>
+                        {p?.tag && <><span className="text-muted-foreground">·</span>
+                        <span className="text-muted-foreground">{p.tag}</span></>}
                         <button
                           onClick={() => onUpdate({ ...screen, personas: screen.personas.filter(x => x !== pid) })}
                           className="text-muted-foreground hover:text-foreground ml-0.5"
@@ -663,10 +435,10 @@ function ScreenCard({
                       </div>
                     );
                   })}
-                  {PERSONAS.filter(p => !screen.personas.includes(p.id)).map(p => (
+                  {PERSONAS.filter(p => !screen.personas.includes(p.name)).map(p => (
                     <button
                       key={p.id}
-                      onClick={() => onUpdate({ ...screen, personas: [...screen.personas, p.id] })}
+                      onClick={() => onUpdate({ ...screen, personas: [...screen.personas, p.name] })}
                       className="flex items-center gap-1 text-xs text-muted-foreground hover:text-foreground border border-dashed border-border rounded-full px-2.5 py-0.5 transition-colors"
                     >
                       <Plus className="h-2.5 w-2.5" strokeWidth={2} />
@@ -1040,7 +812,7 @@ function exportToExcel(modules: ScreenModule[], projectName: string) {
   const rows: string[][] = [header];
   for (const mod of modules) {
     for (const s of mod.screens) {
-      const personas = PERSONAS.filter(x => s.personas.includes(x.id)).map(x => x.name).join("; ");
+      const personas = s.personas.join("; ");
       rows.push([
         mod.name, s.name, s.type, s.complexity,
         s.shared ? "Shared" : "Exclusive",
@@ -1129,47 +901,61 @@ function exportMapToPDF() {
 
 // ─── Main Page ────────────────────────────────────────────────────────────────
 
+// ─── Module color cycle ───────────────────────────────────────────────────────
+
+const SCREEN_MODULE_COLORS = [
+  { color: "border-l-accent",     bg: "bg-accent/[0.04]",  dot: "bg-accent" },
+  { color: "border-l-violet-500", bg: "bg-violet-50",       dot: "bg-violet-500" },
+  { color: "border-l-teal-500",   bg: "bg-teal-50",         dot: "bg-teal-500" },
+  { color: "border-l-amber-500",  bg: "bg-amber-50",        dot: "bg-amber-500" },
+  { color: "border-l-rose-500",   bg: "bg-rose-50",         dot: "bg-rose-500" },
+  { color: "border-l-blue-500",   bg: "bg-blue-50",         dot: "bg-blue-500" },
+];
+
+function mapApiToUiScreenModules(richModules: RichScreenModule[]): ScreenModule[] {
+  return richModules.map((mod, idx) => {
+    const { color, bg, dot } = SCREEN_MODULE_COLORS[idx % SCREEN_MODULE_COLORS.length];
+    return {
+      id: mod.id,
+      name: mod.name,
+      color,
+      bg,
+      dot,
+      screens: mod.screens.map(s => ({
+        id: s.id,
+        name: s.name,
+        type: s.type as ScreenType,
+        personas: s.personaNames,
+        purpose: s.purpose,
+        journeyStage: s.journeyStage,
+        backlogRef: s.backlogRef,
+        entryPoints: s.entryPoints,
+        exitPoints: s.exitPoints,
+        componentHints: s.componentHints,
+        states: s.states as ScreenState[],
+        complexity: s.complexity as Complexity,
+        shared: s.shared,
+        warning: s.warning ?? undefined,
+      })),
+    };
+  });
+}
+
 const ScreenDerivation = () => {
   const navigate = useNavigate();
   const { id: projectId } = useParams<{ id: string }>();
-  const [modules,     setModules]     = useState<ScreenModule[]>(INITIAL_MODULES);
+  const [modules,     setModules]     = useState<ScreenModule[]>([]);
+  const [generating, setGenerating] = useState(true);
+  const [apiError,    setApiError]    = useState<string | null>(null);
 
   useEffect(() => {
     if (!projectId) return;
-    supabase
-      .from("screens")
-      .select("*")
-      .eq("project_id", projectId)
-      .order("sort_order", { ascending: true })
-      .then(({ data, error }) => {
-        if (!error && data && data.length > 0) {
-          // Group into a single module
-          const screens = data.map((row) => ({
-            id: row.id,
-            name: row.name ?? "",
-            type: (row.type ?? "Action") as ScreenType,
-            purpose: "",
-            personas: row.persona_id ? [row.persona_id] : [],
-            journeyStage: "",
-            backlogRef: row.id,
-            shared: false,
-            complexity: "Medium" as Complexity,
-            entryPoints: Array.isArray(row.entry_points) ? row.entry_points : [],
-            exitPoints: Array.isArray(row.exit_points) ? row.exit_points : [],
-            componentHints: Array.isArray(row.component_hints) ? row.component_hints : [],
-            states: ["Loading", "Empty", "Error"] as ScreenState[],
-            warning: undefined,
-          }));
-          setModules([{
-            id: "m0",
-            name: "Screens",
-            color: "#6366F1",
-            bg: "#EEF2FF",
-            dot: "#6366F1",
-            screens,
-          }]);
-        }
-      });
+    setGenerating(true);
+    setApiError(null);
+    runScreens(projectId)
+      .then(res => setModules(mapApiToUiScreenModules(res.screens_rich)))
+      .catch(err => setApiError(err?.message ?? "Failed to load screens. Make sure backend is running on http://localhost:8000"))
+      .finally(() => setGenerating(false));
   }, [projectId]);
   const [projectName, setProjectName] = useState("Aether Platform");
   const [activeTab,   setActiveTab]   = useState("list");
@@ -1188,6 +974,48 @@ const ScreenDerivation = () => {
 
   const updateModule = (id: string, m: ScreenModule) =>
     setModules(prev => prev.map(mod => mod.id === id ? m : mod));
+
+  if (generating) return (
+    <SidebarProvider>
+      <div className="min-h-screen flex w-full bg-background">
+        <AppSidebar />
+        <div className="flex-1 flex flex-col items-center justify-center gap-4">
+          <div className="h-10 w-10 rounded-xl bg-accent/10 flex items-center justify-center">
+            <Sparkles className="h-5 w-5 text-accent animate-pulse" strokeWidth={1.5} />
+          </div>
+          <div className="text-center">
+            <p className="text-sm font-medium text-foreground">Deriving screen inventory…</p>
+            <p className="text-xs text-muted-foreground mt-1">Mapping backlog features to screens. This takes 15–30 seconds.</p>
+          </div>
+          <div className="flex gap-1 mt-2">
+            {[0,1,2].map(i => <div key={i} className="h-1.5 w-1.5 rounded-full bg-accent/40 animate-bounce" style={{ animationDelay: `${i * 0.15}s` }} />)}
+          </div>
+        </div>
+      </div>
+    </SidebarProvider>
+  );
+
+  if (apiError) return (
+    <SidebarProvider>
+      <div className="min-h-screen flex w-full bg-background">
+        <AppSidebar />
+        <div className="flex-1 flex flex-col items-center justify-center gap-4 max-w-md mx-auto text-center px-6">
+          <div className="h-10 w-10 rounded-xl bg-destructive/10 flex items-center justify-center">
+            <AlertTriangle className="h-5 w-5 text-destructive" strokeWidth={1.5} />
+          </div>
+          <div>
+            <p className="text-sm font-medium text-foreground">Screen derivation failed</p>
+            <p className="text-xs text-muted-foreground mt-1 leading-relaxed">{apiError}</p>
+          </div>
+          <Button size="sm" className="rounded-xl gradient-accent text-accent-foreground text-xs gap-1.5"
+            onClick={() => { setGenerating(true); setApiError(null); runScreens(projectId!, true).then(res => setModules(mapApiToUiScreenModules(res.screens_rich))).catch(err => setApiError(err?.message ?? "Retry failed")).finally(() => setGenerating(false)); }}>
+            <RefreshCw className="h-3.5 w-3.5" strokeWidth={1.5} />
+            Retry
+          </Button>
+        </div>
+      </div>
+    </SidebarProvider>
+  );
 
   return (
     <SidebarProvider>
@@ -1244,7 +1072,7 @@ const ScreenDerivation = () => {
                   </DropdownMenuItem>
                 </DropdownMenuContent>
               </DropdownMenu>
-              <Button size="sm" onClick={async () => { if (projectId) { await supabase.from("projects").update({ current_phase: 5, updated_at: new Date().toISOString() }).eq("id", projectId); } navigate(projectId ? `/project/${projectId}/phase/03` : "/dashboard"); }}
+              <Button size="sm" onClick={() => navigate(projectId ? `/project/${projectId}/phase/03` : "/dashboard")}
                 className="h-8 rounded-lg text-xs gap-1.5 gradient-accent text-accent-foreground hover:brightness-110 shadow-soft">
                 Proceed to Prototype
                 <ArrowRight className="h-3.5 w-3.5" strokeWidth={1.5} />
@@ -1391,7 +1219,7 @@ const ScreenDerivation = () => {
                   </DropdownMenuContent>
                 </DropdownMenu>
                 <Button
-                  onClick={async () => { if (projectId) { await supabase.from("projects").update({ current_phase: 5, updated_at: new Date().toISOString() }).eq("id", projectId); } navigate(projectId ? `/project/${projectId}/phase/03` : "/dashboard"); }}
+                  onClick={() => navigate(projectId ? `/project/${projectId}/phase/03` : "/dashboard")}
                   className="h-10 rounded-xl text-sm gap-1.5 gradient-accent text-accent-foreground hover:brightness-110 shadow-soft"
                 >
                   Confirm Screen List & Proceed to Phase 03

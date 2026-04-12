@@ -31,14 +31,14 @@ const CORE_ACTIONS = [
     title: "UX Audit",
     desc: "Evaluate usability, detect friction, and improve experience.",
     cta: "Run Audit",
-    routeSuffix: "/phase/04",
+    route: "/tools/ux-audit",
   },
   {
     icon: PenLine,
     title: "UX Copywriting",
     desc: "Refine microcopy for clarity, tone, and conversions.",
     cta: "Improve Copy",
-    routeSuffix: "/phase/05",
+    route: "/tools/ux-copywriting",
   },
 ];
 
@@ -233,7 +233,7 @@ const Index = () => {
                       }}
                       className="group bg-white rounded-2xl p-6 cursor-pointer"
                       style={{ border: "1px solid #E5E7EB" }}
-                      onClick={() => currentProject ? navigate(`/project/${currentProject.id}${action.routeSuffix}`) : navigate("/project/intake")}
+                      onClick={() => navigate(action.route)}
                     >
                       {/* Icon */}
                       <div

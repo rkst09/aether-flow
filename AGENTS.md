@@ -20,7 +20,7 @@ npx vitest run src/path/to/file.test.ts
 ## Stack
 
 **Frontend:** React 18, Vite + SWC, TypeScript, TailwindCSS, shadcn/ui, Framer Motion, TanStack React Query, React Hook Form + Zod  
-**Backend:** FastAPI (`VITE_API_URL`) — Claude API is called server-side only, never from the frontend  
+**Backend:** FastAPI (`VITE_API_URL`) — Codex API is called server-side only, never from the frontend  
 **Database:** Supabase (Postgres + Auth) — connected via `src/lib/supabase.ts`  
 **Deployment:** Vercel (frontend)
 
@@ -62,7 +62,7 @@ const BASE_URL = import.meta.env.VITE_API_URL || "http://localhost:8000";
 
 async function request<T>(path: string, options?: RequestInit): Promise<T> { ... }
 
-// Phase calls — POST to FastAPI, Claude runs server-side
+// Phase calls — POST to FastAPI, Codex runs server-side
 export const runPhase01 = (projectId: string, prdText: string) =>
   request("/api/phase/01/personas", { method: "POST", body: JSON.stringify({ project_id: projectId, prd_text: prdText }) });
 

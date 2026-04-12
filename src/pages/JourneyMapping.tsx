@@ -1,6 +1,6 @@
-import { useState, useEffect } from "react";
+import { useState, useEffect, useCallback } from "react";
 import { useNavigate, useParams } from "react-router-dom";
-import { supabase } from "@/lib/supabase";
+import { runPersonas, runJourney, saveJourneys, type RichPersona, type RichJourneyMap } from "@/lib/api";
 import { SidebarProvider, SidebarTrigger } from "@/components/ui/sidebar";
 import { AppSidebar } from "@/components/dashboard/AppSidebar";
 import { motion, AnimatePresence } from "framer-motion";
@@ -51,6 +51,7 @@ import {
   FileText,
   Target,
   Zap,
+  Sparkles,
 } from "lucide-react";
 
 // ─── Types ─────────────────────────────────────────────────────────────────────
@@ -86,239 +87,59 @@ const EMOTION_CONFIG: Record<number, { label: string; icon: React.ElementType; c
   1: { label: "Struggling",  icon: Frown, color: "text-destructive",            bg: "bg-destructive/[0.06]",         dotFill: "hsl(0 84% 60%)"   },
 };
 
-// ─── Personas (selector list) ───────────────────────────────────────────────────
+// ─── Persona selector item (derived from RichPersona) ──────────────────────────
 
-const PERSONAS = [
-  { id: "1", name: "Sarah Chen",  tag: "Primary",   initials: "SC", avatarClass: "gradient-accent text-white" },
-  { id: "2", name: "Alex Rivera", tag: "Primary",   initials: "AR", avatarClass: "bg-violet-500 text-white"   },
-  { id: "3", name: "Jordan Patel",tag: "Secondary", initials: "JP", avatarClass: "bg-teal-500 text-white"     },
-  { id: "4", name: "Morgan Kim",  tag: "Edge",      initials: "MK", avatarClass: "bg-amber-500 text-white"    },
-] as const;
+const AVATAR_COLORS = [
+  "gradient-accent text-white",
+  "bg-violet-500 text-white",
+  "bg-teal-500 text-white",
+  "bg-amber-500 text-white",
+  "bg-rose-500 text-white",
+];
 
-// ─── Mock Journey Data ──────────────────────────────────────────────────────────
+interface PersonaItem {
+  id: string;
+  name: string;
+  tag: string;
+  initials: string;
+  avatarClass: string;
+}
 
-const INITIAL_JOURNEYS: Record<string, JourneyStage[]> = {
-  "1": [
-    {
-      id: "s1-1", title: "Discovery", emotionScore: 4,
-      actions: ["Searches for design management tools", "Evaluates 3–4 competitors", "Books a demo"],
-      thoughts: ["Will this replace our current workflow?", "Can the team adopt this quickly?"],
-      painPoints: ["Too many tools to compare", "Hard to assess real team fit without trial"],
-      systemGaps: ["No self-serve trial available", "Demo booking is multi-step"],
-      opportunities: [
-        { id: "o1", text: "Offer instant self-serve trial with pre-loaded sample project", impact: "High", effort: "Medium" },
-        { id: "o2", text: "Add a team-fit assessment to the signup flow", impact: "Medium", effort: "Low" },
-      ],
-    },
-    {
-      id: "s1-2", title: "Onboarding", emotionScore: 3,
-      actions: ["Creates first project", "Invites team members", "Uploads first PRD"],
-      thoughts: ["Where do I start?", "Is there a template I can follow?"],
-      painPoints: ["No guided onboarding tour", "Unclear where to upload PRD first"],
-      systemGaps: ["Blank-state UX with no guidance", "Missing quick-start checklist"],
-      opportunities: [
-        { id: "o3", text: "Introduce a 4-step onboarding checklist with progress tracking", impact: "High", effort: "Low" },
-      ],
-    },
-    {
-      id: "s1-3", title: "Daily Workflow", emotionScore: 4,
-      actions: ["Reviews AI-generated outputs", "Assigns tasks to designers", "Tracks phase progress"],
-      thoughts: ["This is much faster than before", "I need a summary view for standups"],
-      painPoints: ["No dashboard summary for daily standup use", "Phase status is buried in project view"],
-      systemGaps: ["No quick-glance status widget", "Notifications are not actionable"],
-      opportunities: [
-        { id: "o4", text: "Add a daily digest view showing active phases and blockers", impact: "High", effort: "Medium" },
-        { id: "o5", text: "Make phase status visible from the top-level projects list", impact: "Medium", effort: "Low" },
-      ],
-    },
-    {
-      id: "s1-4", title: "Team Collaboration", emotionScore: 2,
-      actions: ["Shares outputs with designers", "Reviews feedback threads", "Re-assigns blocked tasks"],
-      thoughts: ["Why is there no clear ownership?", "Too many notifications, not enough signal"],
-      painPoints: ["Unclear task ownership across phases", "Feedback threads are disconnected from designs"],
-      systemGaps: ["No inline commenting on AI outputs", "No ownership assignment per phase step"],
-      opportunities: [
-        { id: "o6", text: "Introduce ownership tags per phase step with notification controls", impact: "High", effort: "High" },
-        { id: "o7", text: "Allow inline comments directly on generated persona / journey outputs", impact: "High", effort: "Medium" },
-      ],
-    },
-    {
-      id: "s1-5", title: "Sign-off & Reporting", emotionScore: 3,
-      actions: ["Exports BA document", "Presents outputs to stakeholders", "Marks project complete"],
-      thoughts: ["Will stakeholders understand this format?", "Can I customise the export?"],
-      painPoints: ["Export format cannot be branded", "No stakeholder-ready summary PDF"],
-      systemGaps: ["One-size export with no customisation", "No presentation mode"],
-      opportunities: [
-        { id: "o8", text: "Add a branded export option with company logo and colour palette", impact: "Medium", effort: "Medium" },
-        { id: "o9", text: "Create a presentation-mode view for stakeholder walkthroughs", impact: "High", effort: "High" },
-      ],
-    },
-  ],
+function buildPersonaItems(richPersonas: RichPersona[]): PersonaItem[] {
+  return richPersonas.map((p, i) => ({
+    id: p.db_id,
+    name: p.name,
+    tag: p.tag ?? "Secondary",
+    initials: p.name.split(" ").map(w => w[0]).join("").slice(0, 2).toUpperCase(),
+    avatarClass: AVATAR_COLORS[i % AVATAR_COLORS.length],
+  }));
+}
 
-  "2": [
-    {
-      id: "s2-1", title: "Brief Received", emotionScore: 4,
-      actions: ["Reads project brief", "Reviews uploaded PRD", "Notes key design requirements"],
-      thoughts: ["What are the priority screens?", "Is the PRD clear enough to start?"],
-      painPoints: ["PRD often missing key UX context", "No structured brief template provided"],
-      systemGaps: ["Brief arrives as raw document — no structured extraction", "No AI summary at intake"],
-      opportunities: [
-        { id: "o10", text: "Auto-extract key UX requirements from PRD and surface as a brief card", impact: "High", effort: "Medium" },
-      ],
-    },
-    {
-      id: "s2-2", title: "Design Execution", emotionScore: 5,
-      actions: ["Uses prototype prompts to build screens in Lovable", "Iterates on components", "Aligns to design system"],
-      thoughts: ["These prompts are exactly what I needed", "Component suggestions are spot on"],
-      painPoints: ["Some prompts lack interaction detail", "Component hints are sometimes too vague"],
-      systemGaps: ["No prompt versioning to track changes", "No way to flag a prompt for re-generation"],
-      opportunities: [
-        { id: "o11", text: "Add interaction detail layer to every prototype prompt", impact: "High", effort: "Medium" },
-        { id: "o12", text: "Allow designer to flag prompts for AI re-generation with context", impact: "Medium", effort: "Low" },
-      ],
-    },
-    {
-      id: "s2-3", title: "Prototyping", emotionScore: 4,
-      actions: ["Builds interactive prototype in Lovable", "Links screens by flow", "Adds micro-interactions"],
-      thoughts: ["This is fast — half the usual time", "Need to confirm edge state coverage"],
-      painPoints: ["Edge states (empty / error / loading) are not always prompted"],
-      systemGaps: ["Prototype prompts don't include edge state variants by default"],
-      opportunities: [
-        { id: "o13", text: "Automatically include empty, error, and loading state variants in every screen prompt", impact: "High", effort: "Low" },
-      ],
-    },
-    {
-      id: "s2-4", title: "Review Cycle", emotionScore: 2,
-      actions: ["Shares prototype for review", "Receives feedback from PM and stakeholders", "Implements changes"],
-      thoughts: ["Why is feedback so scattered?", "I need a single source of truth for revisions"],
-      painPoints: ["Feedback arrives from multiple channels (Slack, email, comments)", "Revision tracking is manual"],
-      systemGaps: ["No consolidated feedback view inside Aether", "No change log linked to designs"],
-      opportunities: [
-        { id: "o14", text: "Create a consolidated feedback inbox inside Aether linked to prototype screens", impact: "High", effort: "High" },
-      ],
-    },
-    {
-      id: "s2-5", title: "Dev Handoff", emotionScore: 3,
-      actions: ["Exports BA document", "Annotates screens with dev notes", "Hands off to engineers"],
-      thoughts: ["Will engineers understand the intent?", "Is the annotation thorough enough?"],
-      painPoints: ["Dev annotations are manual and time-consuming", "BA document format is not dev-friendly"],
-      systemGaps: ["No auto-annotation feature for dev handoff", "Export not structured for developer consumption"],
-      opportunities: [
-        { id: "o15", text: "Generate developer-ready annotation layer from Phase 6 documentation", impact: "High", effort: "High" },
-        { id: "o16", text: "Add a developer-mode export format with component specs and interaction notes", impact: "High", effort: "Medium" },
-      ],
-    },
-  ],
+function buildJourneyState(journeysRich: RichJourneyMap[]): Record<string, JourneyStage[]> {
+  const result: Record<string, JourneyStage[]> = {};
+  for (const jm of journeysRich) {
+    if (!jm.persona_id) continue;
+    result[jm.persona_id] = (jm.stages ?? []).map(s => ({
+      id: s.id,
+      title: s.title,
+      emotionScore: s.emotionScore,
+      actions: s.actions ?? [],
+      thoughts: s.thoughts ?? [],
+      painPoints: s.painPoints ?? [],
+      systemGaps: s.systemGaps ?? [],
+      opportunities: (s.opportunities ?? []).map(o => ({
+        id: o.id,
+        text: o.text,
+        impact: o.impact as ImpactLevel,
+        effort: o.effort as EffortLevel,
+      })),
+    }));
+  }
+  return result;
+}
 
-  "3": [
-    {
-      id: "s3-1", title: "Initial Briefing", emotionScore: 4,
-      actions: ["Reviews project scope in Aether", "Checks persona and journey outputs", "Aligns with design team on goals"],
-      thoughts: ["Does this align with our OKRs?", "Are the personas realistic for our market?"],
-      painPoints: ["Outputs require context to interpret", "No executive summary layer"],
-      systemGaps: ["No high-level summary view for leadership", "Personas presented in detail without business framing"],
-      opportunities: [
-        { id: "o17", text: "Add an executive summary card at the top of each phase output", impact: "High", effort: "Low" },
-      ],
-    },
-    {
-      id: "s3-2", title: "Progress Check-in", emotionScore: 2,
-      actions: ["Checks project phase status", "Asks team for updates", "Reviews what's blocked"],
-      thoughts: ["Why do I have to chase for status?", "This should be automatic"],
-      painPoints: ["No automatic progress reporting", "Phase completion percentages are unclear"],
-      systemGaps: ["No automated weekly digest for stakeholders", "Progress is only visible if you log in"],
-      opportunities: [
-        { id: "o18", text: "Send automated weekly progress digest to stakeholders via email", impact: "High", effort: "Medium" },
-        { id: "o19", text: "Add a progress percentage to each phase on the Projects page", impact: "Medium", effort: "Low" },
-      ],
-    },
-    {
-      id: "s3-3", title: "Milestone Review", emotionScore: 3,
-      actions: ["Reviews phase outputs before sign-off", "Provides directional feedback", "Approves or requests changes"],
-      thoughts: ["Is this decision-ready?", "What changed since last review?"],
-      painPoints: ["No change history between reviews", "Outputs look the same each visit — hard to spot changes"],
-      systemGaps: ["No diff view or change summary between review sessions"],
-      opportunities: [
-        { id: "o20", text: "Show a 'what changed since your last visit' summary at the top of each phase", impact: "High", effort: "Medium" },
-      ],
-    },
-    {
-      id: "s3-4", title: "Strategic Decision", emotionScore: 4,
-      actions: ["Reviews full workflow output", "Decides to proceed or pivot", "Communicates decision to team"],
-      thoughts: ["I have enough to make a confident call", "How does this compare to our original strategy?"],
-      painPoints: ["No strategic alignment view", "Difficult to compare AI outputs to original business goals"],
-      systemGaps: ["No goal-alignment layer linking outputs to business objectives"],
-      opportunities: [
-        { id: "o21", text: "Add a business goal alignment card that maps each phase output to project OKRs", impact: "High", effort: "High" },
-      ],
-    },
-    {
-      id: "s3-5", title: "Outcome Assessment", emotionScore: 3,
-      actions: ["Reviews shipped product metrics", "Compares against expected UX outcomes", "Documents learnings"],
-      thoughts: ["Did the UX decisions lead to the expected outcomes?", "Where did we miss?"],
-      painPoints: ["No feedback loop between shipped product and design decisions", "Learnings are not captured"],
-      systemGaps: ["No post-ship review or retrospective feature"],
-      opportunities: [
-        { id: "o22", text: "Introduce a post-ship retrospective module that links design decisions to product metrics", impact: "High", effort: "High" },
-      ],
-    },
-  ],
+// ─── (no static mock journey data — all journeys come from the API) ─────────────
 
-  "4": [
-    {
-      id: "s4-1", title: "Invitation Received", emotionScore: 3,
-      actions: ["Receives email invite to review designs", "Clicks link in email", "Arrives at Aether for the first time"],
-      thoughts: ["What am I supposed to do here?", "I hope this doesn't take long"],
-      painPoints: ["Email invite lacks clear instructions", "No preview of what needs reviewing"],
-      systemGaps: ["Invite email has no action summary — just a generic link"],
-      opportunities: [
-        { id: "o23", text: "Add a review summary to the invite email: what to review, how long it takes, deadline", impact: "High", effort: "Low" },
-      ],
-    },
-    {
-      id: "s4-2", title: "Platform Access", emotionScore: 2,
-      actions: ["Logs in (or creates account)", "Navigates to the review task", "Tries to find the right screen"],
-      thoughts: ["Why do I need an account just to review?", "I can't find what I'm supposed to see"],
-      painPoints: ["Forced account creation for an occasional reviewer", "Navigation is confusing for first-time users"],
-      systemGaps: ["No guest review mode", "No 'you are here' orientation on first visit"],
-      opportunities: [
-        { id: "o24", text: "Create a guest reviewer mode — no account needed, access via secure token link", impact: "High", effort: "High" },
-        { id: "o25", text: "Add a lightweight onboarding tip for first-time reviewers explaining navigation", impact: "Medium", effort: "Low" },
-      ],
-    },
-    {
-      id: "s4-3", title: "Reviewing Designs", emotionScore: 2,
-      actions: ["Views assigned screens", "Reads annotations", "Tries to understand context"],
-      thoughts: ["I don't understand the internal terminology", "What exactly am I approving here?"],
-      painPoints: ["Design annotations use internal jargon", "No plain-language summary of what decisions are being approved"],
-      systemGaps: ["Reviewer mode shows full technical detail — no simplified view"],
-      opportunities: [
-        { id: "o26", text: "Add a client review mode with simplified annotations and plain-language decision summaries", impact: "High", effort: "Medium" },
-      ],
-    },
-    {
-      id: "s4-4", title: "Giving Feedback", emotionScore: 3,
-      actions: ["Leaves comments on specific screens", "Marks areas of concern", "Submits feedback"],
-      thoughts: ["I hope my comments are clear enough", "Can I attach a reference?"],
-      painPoints: ["No way to attach reference images to feedback", "Comment threads become long and unstructured"],
-      systemGaps: ["Comment system lacks reference attachment and structured categories"],
-      opportunities: [
-        { id: "o27", text: "Allow reviewers to attach reference images and categorise comments (blocker / suggestion / question)", impact: "High", effort: "Medium" },
-      ],
-    },
-    {
-      id: "s4-5", title: "Final Sign-off", emotionScore: 4,
-      actions: ["Reviews all addressed feedback", "Clicks approve", "Receives confirmation"],
-      thoughts: ["Happy that my concerns were resolved", "Would be good to get a summary of changes"],
-      painPoints: ["No changelog showing how feedback was addressed", "Approval is a single button — no record kept"],
-      systemGaps: ["No feedback resolution log visible to reviewer", "No approval receipt or confirmation email"],
-      opportunities: [
-        { id: "o28", text: "Generate a feedback resolution summary when reviewer approves — showing what changed", impact: "High", effort: "Medium" },
-        { id: "o29", text: "Send a confirmation email with approval receipt after sign-off", impact: "Medium", effort: "Low" },
-      ],
-    },
-  ],
-};
 
 // ─── Stage Tracker ─────────────────────────────────────────────────────────────
 
@@ -841,34 +662,52 @@ function EmptyJourney({ onGenerate }: { onGenerate: () => void }) {
 const JourneyMapping = () => {
   const navigate = useNavigate();
   const { id: projectId } = useParams<{ id: string }>();
-  const [activePersonaId, setActivePersonaId] = useState("1");
-  const [journeys, setJourneys] = useState<Record<string, JourneyStage[]>>(INITIAL_JOURNEYS);
+  const [activePersonaId, setActivePersonaId] = useState("");
+  const [journeys, setJourneys] = useState<Record<string, JourneyStage[]>>({});
+  const [personas, setPersonas] = useState<PersonaItem[]>([]);
+  const [richJourneys, setRichJourneys] = useState<RichJourneyMap[]>([]);
+  const [generating, setGenerating] = useState(true);
+  const [apiError, setApiError] = useState<string | null>(null);
 
   useEffect(() => {
     if (!projectId) return;
-    supabase
-      .from("journey_maps")
-      .select("*")
-      .eq("project_id", projectId)
-      .then(({ data, error }) => {
-        if (!error && data && data.length > 0) {
-          const mapped: Record<string, JourneyStage[]> = {};
-          data.forEach((row) => {
-            const stages: JourneyStage[] = Array.isArray(row.stages) ? row.stages : [];
-            mapped[row.persona_id ?? row.id] = stages;
-          });
-          if (Object.keys(mapped).length > 0) {
-            setJourneys(prev => ({ ...INITIAL_JOURNEYS, ...mapped }));
-          }
-        }
-      });
+    setGenerating(true);
+    setApiError(null);
+    Promise.all([runPersonas(projectId), runJourney(projectId)])
+      .then(([personasRes, journeyRes]) => {
+        const items = buildPersonaItems(personasRes.personas_rich);
+        setPersonas(items);
+        if (items.length > 0) setActivePersonaId(items[0].id);
+        setRichJourneys(journeyRes.journeys_rich);
+        setJourneys(buildJourneyState(journeyRes.journeys_rich));
+      })
+      .catch(err => setApiError(err?.message ?? "Failed to load journeys. Make sure backend is running on http://localhost:8000"))
+      .finally(() => setGenerating(false));
   }, [projectId]);
-  const [projectName, setProjectName] = useState("Aether Project");
+
+  const handleRegenerate = useCallback(() => {
+    if (!projectId) return;
+    setGenerating(true);
+    setApiError(null);
+    runJourney(projectId, true)
+      .then(res => { setRichJourneys(res.journeys_rich); setJourneys(buildJourneyState(res.journeys_rich)); })
+      .catch(err => setApiError(err?.message ?? "Regeneration failed"))
+      .finally(() => setGenerating(false));
+  }, [projectId]);
+
+  const handleProceed = useCallback(async () => {
+    if (!projectId) return;
+    const updated = richJourneys.map(jm => ({ ...jm, stages: (journeys[jm.persona_id ?? ""] ?? jm.stages) as typeof jm.stages }));
+    try { await saveJourneys(projectId, updated); } catch (e) { console.error("save journeys:", e); }
+    navigate(`/project/${projectId}/phase/01/backlog`);
+  }, [projectId, richJourneys, journeys, navigate]);
+
+  const [projectName, setProjectName] = useState("Journey Mapping");
   const [editingName, setEditingName] = useState(false);
   const [nameDraft, setNameDraft] = useState(projectName);
 
   const stages = journeys[activePersonaId] ?? [];
-  const activePersona = PERSONAS.find(p => p.id === activePersonaId)!;
+  const activePersona = personas.find(p => p.id === activePersonaId) ?? personas[0];
 
   // ── Mutations ──
   const setStages = (next: JourneyStage[]) =>
@@ -917,6 +756,46 @@ const JourneyMapping = () => {
     : "—";
 
   const highFrictionCount = stages.filter(s => s.emotionScore <= 2).length;
+
+  if (generating) return (
+    <SidebarProvider>
+      <div className="min-h-screen flex w-full bg-background">
+        <AppSidebar />
+        <div className="flex-1 flex flex-col items-center justify-center gap-4">
+          <div className="h-10 w-10 rounded-xl bg-accent/10 flex items-center justify-center">
+            <Sparkles className="h-5 w-5 text-accent animate-pulse" strokeWidth={1.5} />
+          </div>
+          <div className="text-center">
+            <p className="text-sm font-medium text-foreground">Building journey maps…</p>
+            <p className="text-xs text-muted-foreground mt-1">Mapping flows for each persona. This takes 15–30 seconds.</p>
+          </div>
+          <div className="flex gap-1 mt-2">
+            {[0,1,2].map(i => <div key={i} className="h-1.5 w-1.5 rounded-full bg-accent/40 animate-bounce" style={{ animationDelay: `${i * 0.15}s` }} />)}
+          </div>
+        </div>
+      </div>
+    </SidebarProvider>
+  );
+
+  if (apiError) return (
+    <SidebarProvider>
+      <div className="min-h-screen flex w-full bg-background">
+        <AppSidebar />
+        <div className="flex-1 flex flex-col items-center justify-center gap-4 max-w-md mx-auto text-center px-6">
+          <div className="h-10 w-10 rounded-xl bg-destructive/10 flex items-center justify-center">
+            <AlertTriangle className="h-3.5 w-3.5 text-destructive" strokeWidth={1.5} />
+          </div>
+          <div>
+            <p className="text-sm font-medium text-foreground">Journey generation failed</p>
+            <p className="text-xs text-muted-foreground mt-1 leading-relaxed">{apiError}</p>
+          </div>
+          <Button size="sm" className="rounded-xl gradient-accent text-accent-foreground text-xs gap-1.5" onClick={handleRegenerate}>
+            Retry
+          </Button>
+        </div>
+      </div>
+    </SidebarProvider>
+  );
 
   return (
     <SidebarProvider>
@@ -979,7 +858,7 @@ const JourneyMapping = () => {
 
               <Button
                 disabled={stages.length === 0}
-                onClick={() => navigate(projectId ? `/project/${projectId}/phase/01/backlog` : "/dashboard")}
+                onClick={handleProceed}
                 className="h-8 rounded-lg text-xs gap-1.5 px-3 gradient-accent text-accent-foreground hover:brightness-110 shadow-soft"
               >
                 Proceed to Design Backlog
@@ -1012,7 +891,7 @@ const JourneyMapping = () => {
           {/* ── Persona Selector ── */}
           <div className="border-b border-border/60 px-6 py-3 shrink-0">
             <div className="flex items-center gap-2 overflow-x-auto scrollbar-hide">
-              {PERSONAS.map(p => (
+              {personas.map(p => (
                 <button
                   key={p.id}
                   onClick={() => setActivePersonaId(p.id)}
@@ -1099,7 +978,7 @@ const JourneyMapping = () => {
               </div>
               <Button
                 disabled={stages.length === 0}
-                onClick={() => navigate(projectId ? `/project/${projectId}/phase/01/backlog` : "/dashboard")}
+                onClick={handleProceed}
                 className="h-10 rounded-xl text-sm gap-1.5 gradient-accent text-accent-foreground hover:brightness-110 shadow-soft"
               >
                 Confirm Journey & Proceed to Design Backlog

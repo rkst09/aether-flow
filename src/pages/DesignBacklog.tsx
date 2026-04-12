@@ -1,6 +1,6 @@
 import { useState, useEffect } from "react";
 import { useNavigate, useParams } from "react-router-dom";
-import { supabase } from "@/lib/supabase";
+import { runBacklog, type RichBacklogModule } from "@/lib/api";
 import { SidebarProvider, SidebarTrigger } from "@/components/ui/sidebar";
 import { AppSidebar } from "@/components/dashboard/AppSidebar";
 import { motion, AnimatePresence } from "framer-motion";
@@ -20,7 +20,7 @@ import {
   AlertTriangle, Lightbulb, Pencil, X, Lock,
   Download, FileText, Layers, LayoutGrid,
   Share2, HelpCircle, CheckCircle2, Users,
-  Minus, GitBranch, BookOpen, Dot,
+  Minus, GitBranch, BookOpen, Dot, Sparkles, RefreshCw,
 } from "lucide-react";
 
 // ─── Types ─────────────────────────────────────────────────────────────────────
@@ -80,207 +80,8 @@ interface OpenQuestion {
   resolved: boolean;
 }
 
-// ─── Context personas ───────────────────────────────────────────────────────────
-
-const CTX_PERSONAS = [
-  { id: "1", name: "Sarah Chen",   tag: "Primary",   initials: "SC", cls: "gradient-accent text-white",    painPoints: ["No daily summary view", "Unclear task ownership", "Manual status updates"], opportunity: "Add a daily digest + ownership layer" },
-  { id: "2", name: "Alex Rivera",  tag: "Primary",   initials: "AR", cls: "bg-violet-500 text-white",       painPoints: ["No prompt versioning", "Scattered review feedback", "Manual dev annotations"], opportunity: "Consolidated feedback inbox + auto-annotation" },
-  { id: "3", name: "Jordan Patel", tag: "Secondary", initials: "JP", cls: "bg-teal-500 text-white",         painPoints: ["No executive summary", "No auto progress digest", "No goal alignment view"], opportunity: "Executive layer + automated reporting" },
-  { id: "4", name: "Morgan Kim",   tag: "Edge",      initials: "MK", cls: "bg-amber-500 text-white",        painPoints: ["Forced account creation", "No simplified reviewer view", "No feedback receipt"], opportunity: "Guest reviewer mode + client-friendly UI" },
-];
-
-// ─── Mock Backlog Data ──────────────────────────────────────────────────────────
-
-const INITIAL_MODULES: BacklogModule[] = [
-  {
-    id: "m1", name: "Onboarding System",
-    description: "First-time user experience, project setup, and team activation.",
-    color: "border-l-accent", dotClass: "bg-accent",
-    items: [
-      {
-        id: "i1-1", featureName: "Self-Serve Trial with Sample Project",
-        problemStatement: "New users cannot evaluate product fit without scheduling a demo, creating friction and reducing trial conversion.",
-        personaIds: ["Sarah Chen", "Alex Rivera"],
-        journeyStage: "Discovery",
-        opportunityDirection: "Provide an instant self-serve trial pre-loaded with a sample design project so users can experience core value in under 3 minutes.",
-        priority: "High", effort: "Medium", impact: ["Conversion", "Retention"],
-        dependencies: ["Authentication System", "Sample Data Layer"],
-        edgeCases: ["Trial expires mid-session", "User tries to save without creating account"],
-      },
-      {
-        id: "i1-2", featureName: "Guided First-Project Onboarding Flow",
-        problemStatement: "New users land on a blank state with no direction, causing confusion and early abandonment.",
-        personaIds: ["Sarah Chen"],
-        journeyStage: "Onboarding",
-        opportunityDirection: "Introduce a 4-step onboarding checklist (Upload PRD → Review Personas → Confirm Journey → View Backlog) with visual progress tracking.",
-        priority: "High", effort: "Low", impact: ["Retention", "Experience"],
-        dependencies: ["PRD Upload Module"],
-        edgeCases: ["User skips steps", "PRD upload fails during onboarding"],
-        warning: "Missing edge case: PRD too short to generate meaningful output",
-      },
-      {
-        id: "i1-3", featureName: "Team Invitation & Role Assignment",
-        problemStatement: "Sarah cannot easily bring her design team into a project, limiting collaboration and adoption.",
-        personaIds: ["Sarah Chen"],
-        journeyStage: "Onboarding",
-        opportunityDirection: "Add a multi-member invitation flow with role selection (Admin / Designer / Reviewer) and an invite tracking panel.",
-        priority: "Medium", effort: "Medium", impact: ["Retention", "Conversion"],
-        dependencies: ["Authentication System", "Role-based Access Control"],
-        edgeCases: ["Invite link expires", "User already has account with different role"],
-      },
-    ],
-  },
-  {
-    id: "m2", name: "Project Intelligence Engine",
-    description: "AI-powered phases from persona extraction through backlog derivation.",
-    color: "border-l-violet-500", dotClass: "bg-violet-500",
-    items: [
-      {
-        id: "i2-1", featureName: "AI Persona Extraction & Studio",
-        problemStatement: "Designers spend hours manually building personas from PRD documents — a repetitive, error-prone process that delays UX work.",
-        personaIds: ["Sarah Chen", "Alex Rivera"],
-        journeyStage: "Daily Workflow",
-        opportunityDirection: "Auto-extract confirmed personas from PRD with confidence scoring, inline editing, merge suggestions, and status tracking.",
-        priority: "High", effort: "High", impact: ["Experience", "Retention"],
-        dependencies: ["Claude API via n8n", "PRD Upload Module", "Supabase personas table"],
-        edgeCases: ["PRD mentions no explicit users", "AI extracts >8 personas (suggest grouping)"],
-      },
-      {
-        id: "i2-2", featureName: "Journey Map Generation Interface",
-        problemStatement: "Journey mapping is time-consuming and often skipped, leading to design decisions made without behavioral context.",
-        personaIds: ["Sarah Chen", "Alex Rivera", "Jordan Patel"],
-        journeyStage: "Daily Workflow",
-        opportunityDirection: "Generate stage-based journey maps per persona with emotional scoring, pain points, system gaps, and prioritised opportunities — all inline-editable.",
-        priority: "High", effort: "High", impact: ["Experience", "Retention"],
-        dependencies: ["Persona Extraction", "Claude API via n8n"],
-        edgeCases: ["Persona has no behavioral data", "Journey generates >8 stages"],
-      },
-      {
-        id: "i2-3", featureName: "Design Backlog Derivation System",
-        problemStatement: "Teams lack a structured bridge between UX insights and design execution, leading to misaligned or untracked design work.",
-        personaIds: ["Sarah Chen", "Alex Rivera"],
-        journeyStage: "Daily Workflow",
-        opportunityDirection: "Derive a modular, prioritised design backlog from personas and journey data — with full traceability (persona → journey → problem → feature).",
-        priority: "High", effort: "High", impact: ["Experience", "Conversion"],
-        dependencies: ["Journey Map Module", "Claude API via n8n"],
-        edgeCases: ["No journey data confirmed yet", "All items generated as Low priority"],
-      },
-      {
-        id: "i2-4", featureName: "PRD Confidence & Clarity Scoring",
-        problemStatement: "Users upload PRDs of varying quality — poor documents produce weak AI outputs, causing confusion and rework.",
-        personaIds: ["Sarah Chen"],
-        journeyStage: "Discovery",
-        opportunityDirection: "Analyse uploaded PRD and surface a Clarity Score (0–100%) with specific improvement hints before AI processing begins.",
-        priority: "Medium", effort: "Medium", impact: ["Experience", "Retention"],
-        dependencies: ["Claude API via n8n", "PRD Upload Module"],
-        edgeCases: ["PRD is image-only (no extractable text)", "PRD is in a language other than English"],
-      },
-    ],
-  },
-  {
-    id: "m3", name: "Collaboration & Review",
-    description: "Team feedback, ownership, and design review workflows.",
-    color: "border-l-teal-500", dotClass: "bg-teal-500",
-    items: [
-      {
-        id: "i3-1", featureName: "Inline Commenting on AI Outputs",
-        problemStatement: "Sarah and Alex cannot comment directly on personas, journeys, or backlog items — feedback is scattered across Slack and email.",
-        personaIds: ["Sarah Chen", "Alex Rivera"],
-        journeyStage: "Team Collaboration",
-        opportunityDirection: "Enable threaded inline comments on any AI output card or field, with resolution tracking and notification controls.",
-        priority: "High", effort: "High", impact: ["Retention", "Experience"],
-        dependencies: ["User Authentication", "Real-time DB (Supabase)"],
-        edgeCases: ["Comment on deleted item", "User tagged who has no access"],
-        warning: "Real-time sync requires Supabase Realtime — confirm availability before sprint",
-      },
-      {
-        id: "i3-2", featureName: "Phase Ownership Assignment",
-        problemStatement: "No one knows who is responsible for completing or reviewing each phase step, leading to delays and unclear accountability.",
-        personaIds: ["Sarah Chen"],
-        journeyStage: "Team Collaboration",
-        opportunityDirection: "Allow per-phase-step ownership assignment with automatic notification when a step is completed or blocked.",
-        priority: "High", effort: "Medium", impact: ["Retention", "Performance"],
-        dependencies: ["Team Invitation System", "Phase State Machine"],
-        edgeCases: ["Assigned user leaves team", "Multiple owners on same step"],
-      },
-      {
-        id: "i3-3", featureName: "Consolidated Feedback Inbox",
-        problemStatement: "Alex receives design feedback from multiple channels simultaneously — there is no single place to see, categorise, and address all review feedback.",
-        personaIds: ["Alex Rivera"],
-        journeyStage: "Review Cycle",
-        opportunityDirection: "Create a centralised feedback inbox linked to prototype screens, allowing category filtering (Blocker / Suggestion / Question) and resolution tracking.",
-        priority: "Medium", effort: "High", impact: ["Experience", "Retention"],
-        dependencies: ["Inline Commenting", "Phase 03 Prototype Module"],
-        edgeCases: ["Feedback received after prototype confirmed", "Duplicate feedback from multiple reviewers"],
-      },
-    ],
-  },
-  {
-    id: "m4", name: "Reporting & Export",
-    description: "BA handoff documents, executive summaries, and stakeholder outputs.",
-    color: "border-l-amber-500", dotClass: "bg-amber-500",
-    items: [
-      {
-        id: "i4-1", featureName: "BA Handoff Document Generation",
-        problemStatement: "Phase 6 must produce a developer-ready, structured document — manually creating this takes designers 4–8 hours per project.",
-        personaIds: ["Sarah Chen", "Alex Rivera"],
-        journeyStage: "Sign-off & Reporting",
-        opportunityDirection: "Auto-generate a structured .docx BA handoff document containing screen annotations, interaction logic, edge cases, validation rules, and navigation flows.",
-        priority: "High", effort: "High", impact: ["Conversion", "Retention"],
-        dependencies: ["Claude API via n8n", "Phase 06 Docs Module", "docx library"],
-        edgeCases: ["Missing screen annotations", "Prototype not confirmed before Phase 6"],
-      },
-      {
-        id: "i4-2", featureName: "Branded Export Customisation",
-        problemStatement: "Jordan needs exports that look professional and on-brand for executive stakeholder review — plain exports undermine credibility.",
-        personaIds: ["Jordan Patel"],
-        journeyStage: "Sign-off & Reporting",
-        opportunityDirection: "Allow users to upload company logo, set accent colour, and choose export template before generating stakeholder-facing documents.",
-        priority: "Medium", effort: "Medium", impact: ["Conversion", "Experience"],
-        dependencies: ["BA Handoff Module", "Asset Upload System"],
-        edgeCases: ["Invalid logo format uploaded", "Custom colour doesn't meet contrast requirements"],
-      },
-      {
-        id: "i4-3", featureName: "Executive Summary Layer",
-        problemStatement: "Jordan has no high-level summary view — every review requires reading full-length detailed outputs that aren't designed for his context.",
-        personaIds: ["Jordan Patel"],
-        journeyStage: "Milestone Review",
-        opportunityDirection: "Auto-generate a 1-page executive summary per phase output showing key decisions, risk flags, and recommended next steps.",
-        priority: "Medium", effort: "Medium", impact: ["Retention", "Experience"],
-        dependencies: ["Phase output data structure", "Claude API via n8n"],
-        edgeCases: ["Phase has no confirmed outputs yet", "Summary conflicts with detailed view"],
-      },
-    ],
-  },
-  {
-    id: "m5", name: "External Access",
-    description: "Lightweight guest review and client-facing output experience.",
-    color: "border-l-orange-400", dotClass: "bg-orange-400",
-    items: [
-      {
-        id: "i5-1", featureName: "Guest Reviewer Mode",
-        problemStatement: "Morgan must create a full account to review designs — a significant friction point for an occasional external reviewer.",
-        personaIds: ["Morgan Kim"],
-        journeyStage: "Platform Access",
-        opportunityDirection: "Create a token-based guest access mode that allows external reviewers to view, comment, and approve designs without creating an account.",
-        priority: "High", effort: "High", impact: ["Conversion", "Experience"],
-        dependencies: ["Authentication System", "Comment System", "Token Expiry Management"],
-        edgeCases: ["Token expired before review complete", "Reviewer tries to access other projects via token"],
-        warning: "Security review required — token-based auth must be scoped to specific project and phase",
-      },
-      {
-        id: "i5-2", featureName: "Client Review Simplified View",
-        problemStatement: "Morgan is confused by internal terminology and full design context — she only needs to see what needs her decision.",
-        personaIds: ["Morgan Kim"],
-        journeyStage: "Reviewing Designs",
-        opportunityDirection: "Create a stripped-back review interface showing only review-relevant screens, plain-language decision summaries, and a clear approve/reject action.",
-        priority: "Medium", effort: "Medium", impact: ["Experience", "Conversion"],
-        dependencies: ["Guest Reviewer Mode", "Phase output data"],
-        edgeCases: ["No screens ready for review", "Reviewer rejects without leaving a comment"],
-      },
-    ],
-  },
-];
+// ─── Context personas (populated from API — empty until loaded) ──────────────────
+const CTX_PERSONAS: { id: string; name: string; initials: string; cls: string; painPoints: string[] }[] = [];
 
 // ─── User Flows ─────────────────────────────────────────────────────────────────
 
@@ -635,7 +436,7 @@ function ContextSummary() {
             <span className="font-medium text-foreground">{CTX_PERSONAS.length}</span> personas ·
             <span className="font-medium text-foreground">4</span> journey maps ·
             <span className="font-medium text-foreground">
-              {INITIAL_MODULES.reduce((n, m) => n + m.items.reduce((s, i) => s + i.opportunities?.length, 0), 0)} opportunities
+              0 opportunities
             </span>
           </div>
         </div>
@@ -869,20 +670,10 @@ function BacklogItemCard({ item, onUpdate, onDelete }: {
 
 // ─── Backlog Module Panel ───────────────────────────────────────────────────────
 
-const MODULE_COLORS: Record<string, string> = {
-  "m1": "border-l-accent text-accent bg-accent/[0.06]",
-  "m2": "border-l-violet-500 text-violet-600 bg-violet-50",
-  "m3": "border-l-teal-500 text-teal-600 bg-teal-50",
-  "m4": "border-l-amber-500 text-amber-600 bg-amber-50",
-  "m5": "border-l-orange-400 text-orange-600 bg-orange-50",
-};
-
 function BacklogModulePanel({ module: mod, onUpdateModule }: {
   module: BacklogModule; onUpdateModule: (m: BacklogModule) => void;
 }) {
   const [open, setOpen] = useState(true);
-  const colorCls = MODULE_COLORS[mod.id] ?? MODULE_COLORS["m1"];
-  const [dotBg] = colorCls.split(" ").filter(c => c.startsWith("bg-") && !c.includes("/"));
 
   const updateItem = (id: string, patch: BacklogItem) =>
     onUpdateModule({ ...mod, items: mod.items.map(i => i.id === id ? patch : i) });
@@ -909,7 +700,7 @@ function BacklogModulePanel({ module: mod, onUpdateModule }: {
         onClick={() => setOpen(o => !o)}
         className={cn(
           "w-full flex items-center gap-3 px-5 py-4 border-l-4 transition-colors hover:bg-secondary/20",
-          colorCls.split(" ").filter(c => c.startsWith("border-l-")).join(" "),
+          mod.color,
           open ? "bg-background" : "bg-secondary/10"
         )}
       >
@@ -1325,47 +1116,62 @@ const SECTION_TABS: { key: SectionKey; label: string; icon: React.ElementType; g
   { key: "questions", label: "Open Questions",            icon: HelpCircle, getBadge: (_m, q) => q.filter(x => !x.resolved).length || null },
 ];
 
+// ─── Module color cycle ─────────────────────────────────────────────────────────
+
+const MODULE_COLORS = [
+  { color: "border-l-accent",       dotClass: "bg-accent" },
+  { color: "border-l-violet-500",   dotClass: "bg-violet-500" },
+  { color: "border-l-teal-500",     dotClass: "bg-teal-500" },
+  { color: "border-l-amber-500",    dotClass: "bg-amber-500" },
+  { color: "border-l-orange-400",   dotClass: "bg-orange-400" },
+  { color: "border-l-rose-500",     dotClass: "bg-rose-500" },
+];
+
+function mapApiToUiModules(richModules: RichBacklogModule[]): BacklogModule[] {
+  return richModules.map((mod, idx) => {
+    const { color, dotClass } = MODULE_COLORS[idx % MODULE_COLORS.length];
+    return {
+      id: mod.id,
+      name: mod.name,
+      description: mod.description,
+      color,
+      dotClass,
+      items: mod.items.map(item => ({
+        id: item.id,
+        featureName: item.featureName,
+        problemStatement: item.problemStatement,
+        personaIds: item.personaNames,
+        journeyStage: item.journeyStage,
+        opportunityDirection: item.opportunityDirection,
+        priority: item.priority as Priority,
+        effort: item.effort as Effort,
+        impact: item.impact as ImpactType[],
+        dependencies: item.dependencies,
+        edgeCases: item.edgeCases,
+        warning: item.warning ?? undefined,
+      })),
+    };
+  });
+}
+
 // ─── Main Page ──────────────────────────────────────────────────────────────────
 
 const DesignBacklog = () => {
   const navigate = useNavigate();
   const { id: projectId } = useParams<{ id: string }>();
-  const [modules, setModules] = useState<BacklogModule[]>(INITIAL_MODULES);
+  const [modules, setModules] = useState<BacklogModule[]>([]);
   const [questions, setQuestions] = useState<OpenQuestion[]>(INITIAL_QUESTIONS);
+  const [generating, setGenerating] = useState(true);
+  const [apiError, setApiError] = useState<string | null>(null);
 
   useEffect(() => {
     if (!projectId) return;
-    supabase
-      .from("backlog_items")
-      .select("*")
-      .eq("project_id", projectId)
-      .order("sort_order", { ascending: true })
-      .then(({ data, error }) => {
-        if (!error && data && data.length > 0) {
-          // Group items by a default module
-          const items: BacklogItem[] = data.map((row) => ({
-            id: row.id,
-            featureName: row.task_name ?? "",
-            problemStatement: "",
-            personaIds: row.persona_id ? [row.persona_id] : [],
-            journeyStage: "",
-            opportunityDirection: "",
-            priority: (row.priority as Priority) ?? "Medium",
-            effort: "Medium" as Effort,
-            impact: ["Experience"] as ImpactType[],
-            dependencies: [],
-            edgeCases: [],
-          }));
-          const grouped: BacklogModule = {
-            id: "m0",
-            name: "Imported Items",
-            description: "Items loaded from project",
-            color: "#6366F1",
-            items,
-          };
-          setModules([grouped]);
-        }
-      });
+    setGenerating(true);
+    setApiError(null);
+    runBacklog(projectId)
+      .then(res => setModules(mapApiToUiModules(res.backlog_rich)))
+      .catch(err => setApiError(err?.message ?? "Failed to load backlog. Make sure backend is running on http://localhost:8000"))
+      .finally(() => setGenerating(false));
   }, [projectId]);
   const [activeSection, setActiveSection] = useState<SectionKey>("backlog");
   const [projectName, setProjectName] = useState("Aether Project");
@@ -1377,6 +1183,48 @@ const DesignBacklog = () => {
   const totalItems = modules.reduce((n, m) => n + m.items.length, 0);
   const highItems  = modules.reduce((n, m) => n + m.items.filter(i => i.priority === "High").length, 0);
   const unresolvedQ = questions.filter(q => !q.resolved).length;
+
+  if (generating) return (
+    <SidebarProvider>
+      <div className="min-h-screen flex w-full bg-background">
+        <AppSidebar />
+        <div className="flex-1 flex flex-col items-center justify-center gap-4">
+          <div className="h-10 w-10 rounded-xl bg-accent/10 flex items-center justify-center">
+            <Sparkles className="h-5 w-5 text-accent animate-pulse" strokeWidth={1.5} />
+          </div>
+          <div className="text-center">
+            <p className="text-sm font-medium text-foreground">Deriving design backlog…</p>
+            <p className="text-xs text-muted-foreground mt-1">Analysing personas and journey maps. This takes 15–30 seconds.</p>
+          </div>
+          <div className="flex gap-1 mt-2">
+            {[0,1,2].map(i => <div key={i} className="h-1.5 w-1.5 rounded-full bg-accent/40 animate-bounce" style={{ animationDelay: `${i * 0.15}s` }} />)}
+          </div>
+        </div>
+      </div>
+    </SidebarProvider>
+  );
+
+  if (apiError) return (
+    <SidebarProvider>
+      <div className="min-h-screen flex w-full bg-background">
+        <AppSidebar />
+        <div className="flex-1 flex flex-col items-center justify-center gap-4 max-w-md mx-auto text-center px-6">
+          <div className="h-10 w-10 rounded-xl bg-destructive/10 flex items-center justify-center">
+            <AlertTriangle className="h-5 w-5 text-destructive" strokeWidth={1.5} />
+          </div>
+          <div>
+            <p className="text-sm font-medium text-foreground">Backlog generation failed</p>
+            <p className="text-xs text-muted-foreground mt-1 leading-relaxed">{apiError}</p>
+          </div>
+          <Button size="sm" className="rounded-xl gradient-accent text-accent-foreground text-xs gap-1.5"
+            onClick={() => { setGenerating(true); setApiError(null); runBacklog(projectId!, true).then(res => setModules(mapApiToUiModules(res.backlog_rich))).catch(err => setApiError(err?.message ?? "Retry failed")).finally(() => setGenerating(false)); }}>
+            <RefreshCw className="h-3.5 w-3.5" strokeWidth={1.5} />
+            Retry
+          </Button>
+        </div>
+      </div>
+    </SidebarProvider>
+  );
 
   return (
     <SidebarProvider>
@@ -1427,12 +1275,7 @@ const DesignBacklog = () => {
               </Button>
 
               <Button
-                onClick={async () => {
-                  if (projectId) {
-                    await supabase.from("projects").update({ current_phase: 4, updated_at: new Date().toISOString() }).eq("id", projectId);
-                  }
-                  navigate(projectId ? `/project/${projectId}/phase/02` : "/dashboard");
-                }}
+                onClick={() => navigate(projectId ? `/project/${projectId}/phase/02` : "/dashboard")}
                 className="h-8 rounded-lg text-xs gap-1.5 px-3 gradient-accent text-accent-foreground hover:brightness-110 shadow-soft">
                 Proceed to Screen Derivation
                 <ArrowRight className="h-3.5 w-3.5" strokeWidth={1.5} />
@@ -1555,12 +1398,7 @@ const DesignBacklog = () => {
                 Export Excel
               </Button>
               <Button
-                onClick={async () => {
-                  if (projectId) {
-                    await supabase.from("projects").update({ current_phase: 4, updated_at: new Date().toISOString() }).eq("id", projectId);
-                  }
-                  navigate(projectId ? `/project/${projectId}/phase/02` : "/dashboard");
-                }}
+                onClick={() => navigate(projectId ? `/project/${projectId}/phase/02` : "/dashboard")}
                 className="h-10 rounded-xl text-sm gap-1.5 gradient-accent text-accent-foreground hover:brightness-110 shadow-soft">
                 Proceed to Screen Derivation
                 <ArrowRight className="h-4 w-4" strokeWidth={1.5} />

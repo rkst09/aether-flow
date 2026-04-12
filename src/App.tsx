@@ -20,6 +20,8 @@ import PrototypePage from "./pages/PrototypePage.tsx";
 import UXAudit from "./pages/UXAudit.tsx";
 import UXCopyReview from "./pages/UXCopyReview.tsx";
 import DesignDocumentation from "./pages/DesignDocumentation.tsx";
+import UXAuditTool from "./pages/tools/UXAuditTool.tsx";
+import UXCopywritingTool from "./pages/tools/UXCopywritingTool.tsx";
 import NotFound from "./pages/NotFound.tsx";
 
 const queryClient = new QueryClient();
@@ -54,6 +56,10 @@ const App = () => (
             <Route path="/project/:id/phase/04"         element={<P><UXAudit /></P>} />
             <Route path="/project/:id/phase/05"         element={<P><UXCopyReview /></P>} />
             <Route path="/project/:id/phase/06"         element={<P><DesignDocumentation /></P>} />
+
+            {/* ── Standalone Tools ────────────────────────────────────── */}
+            <Route path="/tools/ux-audit"       element={<P><UXAuditTool /></P>} />
+            <Route path="/tools/ux-copywriting" element={<P><UXCopywritingTool /></P>} />
 
             <Route path="*" element={<NotFound />} />
           </Routes>

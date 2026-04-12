@@ -1,6 +1,6 @@
-import { useState } from "react";
+import { useState, useEffect } from "react";
 import { useNavigate, useParams } from "react-router-dom";
-import { supabase } from "@/lib/supabase";
+import { runDocs } from "@/lib/api";
 import { motion, AnimatePresence } from "framer-motion";
 import {
   ArrowLeft, Download, FileText, ChevronDown,
@@ -40,331 +40,6 @@ interface ScreenDoc {
 }
 interface ModuleDoc  { id: string; name: string; purpose: string; flows: string[]; screens: ScreenDoc[]; }
 interface PersonaDoc { id: string; name: string; role: string; initial: string; context: string; goals: string[]; modules: ModuleDoc[]; }
-
-// ─── Mock Data ────────────────────────────────────────────────────────────────
-
-const PROJECT = { name: "Design System Redesign", personas: 3, modules: 5, screens: 8, flows: 8, copyReviewed: 16, auditIssues: 24 };
-
-const MOCK_DOC: PersonaDoc[] = [
-  {
-    id: "p1", name: "Sarah Chen", role: "Product Manager", initial: "SC",
-    context: "Primary user managing daily product operations, roadmap tracking, and cross-functional alignment across a B2B SaaS platform.",
-    goals: ["Track feature delivery in real time", "Align team around roadmap priorities", "Reduce overhead through async updates"],
-    modules: [
-      {
-        id: "m1", name: "Dashboard & Analytics", purpose: "Central workspace for daily monitoring and reporting",
-        flows: ["Login → Dashboard", "Dashboard → Analytics Detail", "Dashboard → Project Management"],
-        screens: [
-          {
-            id: "s1", name: "Dashboard Overview", screenType: "Dashboard / Command Centre",
-            personas: ["Sarah Chen"], completeness: 94,
-            purpose: "Provides Sarah with a real-time snapshot of all active projects, pending actions, and key metrics.",
-            elements: [
-              { name: "Project Status Cards",  elType: "Card Grid",          function: "Shows project name, phase, completion %, last-updated", conditions: "Visible when ≥1 project exists" },
-              { name: "Phase Progress Bar",    elType: "Progress Indicator", function: "Visualises pipeline progression per project card", conditions: "Always visible inside card" },
-              { name: "Generate Report CTA",   elType: "Primary Button",     function: "Triggers report generation for selected project", conditions: "Enabled only when project is selected" },
-              { name: "Recent Activity Feed",  elType: "List / Feed",        function: "Chronological changes without navigating to individual projects", conditions: "Shows last 10 entries" },
-            ],
-            interactions: [
-              { trigger: "Click project card",      result: "Opens Project Detail",              navigation: "→ /project/:id"       },
-              { trigger: "Click 'Generate Report'", result: "Initiates report; button loads",    navigation: "Stays on page"        },
-              { trigger: "Click 'View all'",        result: "Expands activity feed",             navigation: "In-page expansion"    },
-              { trigger: "Hover project card",      result: "Card elevates; quick actions appear", navigation: "No navigation"     },
-            ],
-            states: [
-              { state: "Default",          description: "All project cards visible; Generate Report disabled" },
-              { state: "Loading",          description: "Skeleton cards; activity feed shows placeholders" },
-              { state: "Empty",            description: "'No projects yet — create your first' with CTA" },
-              { state: "Error",            description: "'Couldn't load your projects — try again'" },
-              { state: "Project Selected", description: "Selected card highlighted; Generate Report enabled" },
-            ],
-            navigation: {
-              entry: ["Login success → redirect here", "Sidebar 'Dashboard' link"],
-              exit:  ["Project card → /project/:id", "Sidebar navigation → any page"],
-              conditional: ["No projects: prompt redirects to /project/intake after 3s"],
-            },
-            edgeCases: [
-              "User has 0 projects → empty state with onboarding CTA",
-              "User has >20 projects → paginate at 10 per page",
-              "Report generation fails → inline error; auto-retry once",
-              "Session expired during generation → auth prompt without losing context",
-            ],
-            copyRefs: [
-              { text: "Generate Report",                                    kind: "static",  purpose: "Primary CTA" },
-              { text: "No projects yet — create your first to get started", kind: "static",  purpose: "Empty state" },
-              { text: "Generating…",                                        kind: "dynamic", purpose: "Loading CTA label" },
-            ],
-            dependencies: ["GET /api/projects", "GET /api/activity", "POST /api/reports/generate", "Supabase auth session"],
-          },
-          {
-            id: "s2", name: "Analytics Detail", screenType: "Detail View / Dashboard",
-            personas: ["Sarah Chen"], completeness: 78,
-            flags: ["Missing validation rules", "No edge cases defined for empty chart state"],
-            purpose: "Deep-dive metrics for a selected project: phase-level analytics and trend data.",
-            elements: [
-              { name: "Phase Completion Chart", elType: "Bar Chart",        function: "Shows completion % per phase", conditions: "Requires project selection" },
-              { name: "Date Range Picker",      elType: "Date Input",       function: "Filters all chart data to a specific period" },
-              { name: "Export Chart CTA",       elType: "Secondary Button", function: "Exports chart as PNG or CSV", conditions: "Enabled when data present" },
-            ],
-            interactions: [
-              { trigger: "Select date range",  result: "All charts re-render for period",          navigation: "No navigation" },
-              { trigger: "Click Export Chart", result: "Export format picker (PNG / CSV) appears", navigation: "No navigation" },
-            ],
-            states: [
-              { state: "Default", description: "Charts populated with last 30 days of data" },
-              { state: "Loading", description: "Charts show skeleton while data fetches" },
-              { state: "Empty",   description: "'No data for this period' on each empty chart" },
-              { state: "Error",   description: "Error banner with retry" },
-            ],
-            navigation: { entry: ["Dashboard → Analytics tab"], exit: ["Back → Dashboard", "Sidebar navigation"] },
-            edgeCases: [],
-            copyRefs: [{ text: "No data for this period", kind: "static", purpose: "Empty chart state" }],
-            dependencies: ["GET /api/analytics/:projectId", "Supabase auth session"],
-          },
-        ],
-      },
-      {
-        id: "m2", name: "Project Management", purpose: "End-to-end project creation and lifecycle management",
-        flows: ["Dashboard → Project List", "Project List → Project Creation", "Project Creation → Intake"],
-        screens: [
-          {
-            id: "s3", name: "Project Creation", screenType: "Multi-step Form",
-            personas: ["Sarah Chen"], completeness: 71,
-            flags: ["Missing validation rules"],
-            purpose: "Guided form to create a new project, upload a PRD, and enter the Phase 01 pipeline.",
-            elements: [
-              { name: "Project Name Input", elType: "Text Input",     function: "Sets the project identifier used across all phases", conditions: "Required" },
-              { name: "PRD Upload Zone",    elType: "File Drop Zone", function: "Uploads the PRD that drives all 6 phases", conditions: "Required" },
-              { name: "Industry Selector",  elType: "Dropdown",       function: "Informs persona and copy tone defaults", conditions: "Optional; defaults to 'General'" },
-              { name: "Start Pipeline CTA", elType: "Primary Button", function: "Submits project and enters Phase 01", conditions: "Enabled only when name + PRD provided" },
-            ],
-            interactions: [
-              { trigger: "File dropped",           result: "Validated, previewed; CTA may enable",  navigation: "No navigation"       },
-              { trigger: "Click 'Start Pipeline'", result: "Submits; transitions to Phase 01",      navigation: "→ /project/phase/01" },
-              { trigger: "Invalid file type",      result: "Drop zone shows specific error message", navigation: "No navigation"       },
-            ],
-            states: [
-              { state: "Default",          description: "Empty form; Start CTA disabled" },
-              { state: "Partially Filled", description: "Name OR PRD provided but not both; CTA disabled" },
-              { state: "Complete",         description: "Name + PRD provided; CTA enabled" },
-              { state: "Loading",          description: "CTA loading; form inputs disabled" },
-              { state: "Error",            description: "Inline errors on failed validation or submission" },
-            ],
-            validation: [
-              { field: "Project Name", required: true,  format: "Text",              constraints: "1–120 characters; no special chars except hyphens", errorBehavior: "'Project name is required'" },
-              { field: "PRD Upload",   required: true,  format: "PDF, DOCX, or DOC", constraints: "Max 25 MB; max 1 file",                              errorBehavior: "'Invalid file type' or 'File exceeds 25 MB'" },
-              { field: "Industry",     required: false, format: "Dropdown selection", constraints: "One of predefined list",                             errorBehavior: "No error — defaults to 'General'" },
-            ],
-            navigation: {
-              entry: ["Project List → 'New Project'", "Dashboard → 'Start New Project'"],
-              exit:  ["Success → /project/phase/01", "Cancel → /projects"],
-              conditional: ["Duplicate name → warn inline; still allow creation", "Upload failure → stay; show retry"],
-            },
-            edgeCases: [
-              "Duplicate project name → warning; still allow creation",
-              "Upload interrupted → retry option",
-              "Navigate away mid-form → 'Unsaved changes — leave?' confirm",
-              "Password-protected PDF → specific error message",
-            ],
-            copyRefs: [
-              { text: "Start Pipeline",                                  kind: "static",  purpose: "Primary CTA" },
-              { text: "Drop your PRD here, or click to browse",          kind: "static",  purpose: "Upload zone instruction" },
-              { text: "Invalid file type — upload a PDF, DOCX, or DOC", kind: "static",  purpose: "Validation error" },
-            ],
-            dependencies: ["POST /api/projects", "POST /api/upload/prd", "Supabase auth session", "Client-side file validation"],
-          },
-        ],
-      },
-    ],
-  },
-  {
-    id: "p2", name: "Marcus Webb", role: "Enterprise Admin", initial: "MW",
-    context: "Manages user accounts, permissions, and platform configuration across a large enterprise deployment.",
-    goals: ["Control user access and roles across departments", "Configure platform for compliance", "Audit system activity"],
-    modules: [
-      {
-        id: "m3", name: "User Management", purpose: "Create, manage, and audit user accounts and role assignments",
-        flows: ["Settings → User Management", "User Management → Role Configuration"],
-        screens: [
-          {
-            id: "s4", name: "User Directory", screenType: "List / Data Table",
-            personas: ["Marcus Webb"], completeness: 84,
-            purpose: "Browse, search, filter, and manage all user accounts in the workspace.",
-            elements: [
-              { name: "User Table",      elType: "Data Table",      function: "Primary interface for all user records", conditions: "Paginated at 25 rows" },
-              { name: "Invite User CTA", elType: "Primary Button",  function: "Opens user invitation modal", conditions: "Always enabled for admin" },
-              { name: "Role Filter",     elType: "Dropdown Filter", function: "Narrows list to specific role groups" },
-              { name: "Bulk Action Bar", elType: "Action Bar",      function: "Bulk role change, deactivation, or export", conditions: "Hidden; appears on row selection" },
-            ],
-            interactions: [
-              { trigger: "Click user row",      result: "Opens user detail side panel", navigation: "Side panel overlay" },
-              { trigger: "Click 'Invite User'", result: "Opens invitation modal",       navigation: "Modal overlay"     },
-              { trigger: "Select rows",         result: "Bulk action bar appears",      navigation: "No navigation"     },
-            ],
-            states: [
-              { state: "Default",          description: "Table populated; no rows selected" },
-              { state: "Loading",          description: "Table rows show skeleton placeholders" },
-              { state: "Empty",            description: "'No users yet — invite your first team member'" },
-              { state: "Selection Active", description: "Bulk action bar visible; selected rows highlighted" },
-            ],
-            navigation: { entry: ["Settings → User Management tab"], exit: ["User row → side panel", "Roles → /admin/roles"] },
-            edgeCases: [
-              "0 users → empty state with invite CTA",
-              "Deactivate own account → block: 'You cannot deactivate your own account'",
-              "Bulk deactivate all admins → block with warning dialog",
-            ],
-            copyRefs: [
-              { text: "Invite User",                                   kind: "static", purpose: "Primary CTA" },
-              { text: "No users yet — invite your first team member",  kind: "static", purpose: "Empty state" },
-            ],
-            dependencies: ["GET /api/admin/users", "POST /api/admin/invite", "Admin role permission required"],
-          },
-          {
-            id: "s5", name: "Role Configuration", screenType: "Settings / Permission Matrix",
-            personas: ["Marcus Webb"], completeness: 65,
-            flags: ["Incomplete state variations", "No edge cases defined"],
-            purpose: "Define and assign permission sets to user roles across the platform.",
-            elements: [
-              { name: "Role List",         elType: "Sidebar List",       function: "Navigation between role definitions" },
-              { name: "Permission Matrix", elType: "Toggle Grid / Table",function: "Granular per-permission toggles per role", conditions: "Populated when a role is selected" },
-              { name: "Save Role CTA",     elType: "Primary Button",     function: "Persists role permission changes", conditions: "Enabled only when unsaved changes exist" },
-            ],
-            interactions: [
-              { trigger: "Click role",        result: "Matrix updates to show selected role", navigation: "No navigation" },
-              { trigger: "Toggle permission", result: "Permission updates; Save CTA enables",  navigation: "No navigation" },
-              { trigger: "Click 'Save Role'", result: "Changes persisted",                    navigation: "No navigation" },
-            ],
-            states: [
-              { state: "Default",         description: "First role selected; matrix populated" },
-              { state: "Unsaved Changes", description: "Unsaved indicator visible; Save CTA enabled" },
-              { state: "Saving",          description: "CTA loading; all toggles disabled" },
-            ],
-            navigation: { entry: ["User Management → Roles tab"], exit: ["Back → User Management"] },
-            edgeCases: [],
-            copyRefs: [{ text: "Save Role", kind: "static", purpose: "Persist permission changes CTA" }],
-            dependencies: ["GET /api/admin/roles", "PATCH /api/admin/roles/:id", "Admin role permission required"],
-          },
-        ],
-      },
-      {
-        id: "m4", name: "System Configuration", purpose: "Global platform settings, integrations, and compliance controls",
-        flows: ["Settings → System Configuration"],
-        screens: [
-          {
-            id: "s6", name: "Global Settings", screenType: "Settings Page",
-            personas: ["Marcus Webb"], completeness: 90,
-            purpose: "Configure platform-wide behaviour: notifications, integrations, data retention, compliance.",
-            elements: [
-              { name: "Settings Sections", elType: "Accordion",      function: "Grouped panels: Notifications, Integrations, Data Retention, Compliance" },
-              { name: "Save Preferences",  elType: "Primary Button", function: "Saves all changes across sections", conditions: "Enabled only when unsaved changes exist" },
-            ],
-            interactions: [
-              { trigger: "Toggle setting",         result: "Unsaved indicator; Save enables",      navigation: "No navigation" },
-              { trigger: "Click 'Save Preferences'", result: "All settings saved; success toast", navigation: "No navigation" },
-            ],
-            states: [
-              { state: "Default",         description: "Current values; Save CTA disabled" },
-              { state: "Unsaved Changes", description: "Save CTA enabled; unsaved badge visible" },
-              { state: "Saving",          description: "CTA loading; all inputs disabled" },
-              { state: "Success",         description: "Toast: 'Settings saved'; unsaved badge clears" },
-              { state: "Error",           description: "Toast: 'Couldn't save settings — try again'" },
-            ],
-            validation: [
-              { field: "Data Retention Period", required: false, format: "Number (days)", constraints: "Min: 30, Max: 3650", errorBehavior: "'Must be between 30 and 3650 days'" },
-            ],
-            navigation: { entry: ["Sidebar → Settings", "Admin panel → Global Settings tab"], exit: ["Sidebar navigation → any page"] },
-            edgeCases: ["Unsaved changes + navigate away → confirm dialog", "Integration OAuth fails → inline provider-specific error"],
-            copyRefs: [
-              { text: "Save account preferences",                       kind: "static", purpose: "Primary CTA" },
-              { text: "Settings saved",                                 kind: "static", purpose: "Success toast" },
-              { text: "Couldn't save settings — try again",             kind: "static", purpose: "Error toast" },
-            ],
-            dependencies: ["GET /api/settings", "PATCH /api/settings", "Admin role permission", "Integration OAuth flows"],
-          },
-        ],
-      },
-    ],
-  },
-  {
-    id: "p3", name: "Priya Nair", role: "Support Agent", initial: "PN",
-    context: "Handles inbound support tickets, escalations, and customer communication in a high-volume environment.",
-    goals: ["Resolve tickets efficiently", "Identify escalation triggers early", "Maintain SLA targets"],
-    modules: [
-      {
-        id: "m5", name: "Support Operations", purpose: "Queue management, ticket processing, and escalation workflows",
-        flows: ["Login → Support Queue", "Support Queue → Ticket Detail", "Ticket Detail → Escalation"],
-        screens: [
-          {
-            id: "s7", name: "Support Queue", screenType: "Queue / List View",
-            personas: ["Priya Nair"], completeness: 82,
-            purpose: "Prioritised view of all open tickets with SLA indicators for efficient triage.",
-            elements: [
-              { name: "Ticket Queue Table", elType: "Data Table",       function: "Sorted list: priority, SLA countdown, subject, requester, assignee", conditions: "Real-time SLA updates" },
-              { name: "Priority Filter",    elType: "Tab Filter",       function: "Filters queue: All / High / Medium / Low" },
-              { name: "Claim Ticket CTA",   elType: "Secondary Button", function: "Assigns unassigned ticket to logged-in agent", conditions: "Unassigned tickets only" },
-            ],
-            interactions: [
-              { trigger: "Click ticket row",     result: "Opens Ticket Detail",            navigation: "→ /support/ticket/:id" },
-              { trigger: "Click 'Claim Ticket'", result: "Ticket assigned; row updates",   navigation: "No navigation"         },
-              { trigger: "Filter tab change",    result: "Queue re-filters by priority",   navigation: "No navigation"         },
-            ],
-            states: [
-              { state: "Default",     description: "Queue sorted by SLA — most urgent first" },
-              { state: "Empty Queue", description: "'All caught up — no open tickets'" },
-              { state: "Overdue",     description: "SLA-overdue rows highlighted red; counter shows negative time" },
-            ],
-            navigation: { entry: ["Login → redirect for Support role"], exit: ["Ticket row → /support/ticket/:id"] },
-            edgeCases: [
-              "Empty queue → 'All caught up' state",
-              "Ticket claimed simultaneously → 'This ticket was just claimed by {name}'",
-              "SLA breach → row turns red; manager notification triggered",
-            ],
-            copyRefs: [
-              { text: "All caught up — no open tickets",        kind: "static",  purpose: "Empty queue state" },
-              { text: "Claim Ticket",                           kind: "static",  purpose: "Per-row CTA" },
-              { text: "This ticket was just claimed by {name}", kind: "dynamic", purpose: "Concurrency conflict message" },
-            ],
-            dependencies: ["GET /api/support/queue", "PATCH .../claim", "WebSocket for real-time SLA", "Supabase auth session"],
-          },
-          {
-            id: "s8", name: "Ticket Detail", screenType: "Detail View / Workspace",
-            personas: ["Priya Nair"], completeness: 76,
-            flags: ["No edge cases defined for attachment handling"],
-            purpose: "Full ticket view with conversation thread, response composer, and escalation controls.",
-            elements: [
-              { name: "Conversation Thread", elType: "Message List",    function: "Chronological thread between customer and agents", conditions: "Locked when resolved" },
-              { name: "Response Composer",   elType: "Rich Text Input", function: "Multi-line reply input with formatting and attachments" },
-              { name: "Escalate CTA",        elType: "Secondary Button",function: "Routes ticket to senior agent or specialist team", conditions: "Triggers confirmation modal" },
-              { name: "Resolve CTA",         elType: "Primary Button",  function: "Marks ticket resolved; triggers satisfaction prompt", conditions: "Enabled when ≥1 reply sent" },
-            ],
-            interactions: [
-              { trigger: "Click 'Escalate'",  result: "Confirmation modal with reason + target team", navigation: "Modal overlay"         },
-              { trigger: "Click 'Resolve'",   result: "Ticket resolved; survey sent; return to queue", navigation: "→ /support/queue"     },
-              { trigger: "Submit reply",       result: "Message appended; customer notified",           navigation: "No navigation"        },
-            ],
-            states: [
-              { state: "Default",   description: "Thread populated; Resolve CTA disabled" },
-              { state: "Replied",   description: "Resolve CTA enabled once reply has been sent" },
-              { state: "Escalated", description: "'Escalated' badge; Escalate CTA hidden; Resolve needs manager approval" },
-              { state: "Resolved",  description: "Thread locked; composer hidden; resolution banner shown" },
-            ],
-            navigation: {
-              entry: ["Support Queue → ticket row"],
-              exit:  ["Resolve → /support/queue", "Back → /support/queue"],
-              conditional: ["Escalated → Resolve requires manager approval"],
-            },
-            edgeCases: [],
-            copyRefs: [
-              { text: "Escalate", kind: "static", purpose: "Secondary CTA — escalation flow" },
-              { text: "Resolve",  kind: "static", purpose: "Primary CTA — closes ticket lifecycle" },
-            ],
-            dependencies: ["GET /api/support/tickets/:id", "POST .../reply", "POST .../escalate", "PATCH .../resolve", "WebSocket for thread updates"],
-          },
-        ],
-      },
-    ],
-  },
-];
 
 // ─── Derived helpers ──────────────────────────────────────────────────────────
 
@@ -429,7 +104,7 @@ function exportDocx(data: PersonaDoc[]) {
 }
 
 function exportJSON(data: PersonaDoc[]) {
-  downloadBlob(JSON.stringify({ version: "1.0", generated: new Date().toISOString(), project: PROJECT, documentation: data }, null, 2), "Aether_Design_Documentation.json", "application/json");
+  downloadBlob(JSON.stringify({ version: "1.0", generated: new Date().toISOString(), documentation: data }, null, 2), "Aether_Design_Documentation.json", "application/json");
 }
 
 function exportPDF(data: PersonaDoc[]) {
@@ -689,7 +364,7 @@ function ModuleBlock({ mod }: { mod: ModuleDoc }) {
 
 // ─── Export Menu ──────────────────────────────────────────────────────────────
 
-function ExportMenu({ size = "sm" }: { size?: "sm" | "default" }) {
+function ExportMenu({ size = "sm", data }: { size?: "sm" | "default"; data: PersonaDoc[] }) {
   return (
     <DropdownMenu>
       <DropdownMenuTrigger asChild>
@@ -700,15 +375,15 @@ function ExportMenu({ size = "sm" }: { size?: "sm" | "default" }) {
       </DropdownMenuTrigger>
       <DropdownMenuContent align="end" className="w-56">
         <DropdownMenuLabel>BA Handoff</DropdownMenuLabel>
-        <DropdownMenuItem onClick={() => exportDocx(MOCK_DOC)}>
+        <DropdownMenuItem onClick={() => exportDocx(data)}>
           <FileText className="h-3.5 w-3.5 mr-2" strokeWidth={1.5} />Download .docx
         </DropdownMenuItem>
         <DropdownMenuSeparator />
         <DropdownMenuLabel>Other Formats</DropdownMenuLabel>
-        <DropdownMenuItem onClick={() => exportJSON(MOCK_DOC)}>
+        <DropdownMenuItem onClick={() => exportJSON(data)}>
           <FileSpreadsheet className="h-3.5 w-3.5 mr-2" strokeWidth={1.5} />Export JSON
         </DropdownMenuItem>
-        <DropdownMenuItem onClick={() => exportPDF(MOCK_DOC)}>
+        <DropdownMenuItem onClick={() => exportPDF(data)}>
           <Eye className="h-3.5 w-3.5 mr-2" strokeWidth={1.5} />Export PDF
         </DropdownMenuItem>
       </DropdownMenuContent>
@@ -730,43 +405,43 @@ export default function DesignDocumentation() {
   const navigate = useNavigate();
   const { id: projectId } = useParams<{ id: string }>();
 
-  const [docPhase,      setDocPhase]      = useState<DocPhase>("preview");
-  const [activePersona, setActivePersona] = useState(MOCK_DOC[0].id);
+  const [docPhase,      setDocPhase]      = useState<DocPhase>(projectId ? "generating" : "preview");
+  const [personaDocs,   setPersonaDocs]   = useState<PersonaDoc[]>([]);
+  const [activePersona, setActivePersona] = useState<string>("");
   const [genLabel,      setGenLabel]      = useState(0);
   const [warningsOpen,  setWarningsOpen]  = useState(true);
+  const [apiError,      setApiError]      = useState<string | null>(null);
 
-  const warnings    = collectWarnings(MOCK_DOC);
-  const completeness = overallCompleteness(MOCK_DOC);
-  const activeData  = MOCK_DOC.find(p => p.id === activePersona) ?? MOCK_DOC[0];
-
-  function handleGenerate() {
-    setDocPhase("generating");
-    if (projectId) {
-      supabase.from("agent_runs").insert({
-        project_id: projectId, phase: 6, status: "running",
-        input_json: { personas: MOCK_DOC.length, completeness },
-      });
-    }
-    let i = 0;
+  useEffect(() => {
+    if (!projectId) return;
+    let idx = 0;
     const iv = setInterval(() => {
-      i++;
-      if (i < GENERATING_LABELS.length) setGenLabel(i);
-      else {
+      idx = (idx + 1) % GENERATING_LABELS.length;
+      setGenLabel(idx);
+    }, 600);
+    runDocs(projectId)
+      .then(({ persona_docs }) => {
         clearInterval(iv);
-        setTimeout(async () => {
-          setDocPhase("complete");
-          if (projectId) {
-            await supabase.from("projects")
-              .update({ status: "completed", current_phase: 9, updated_at: new Date().toISOString() })
-              .eq("id", projectId);
-            await supabase.from("agent_runs")
-              .update({ status: "completed", output_json: { screens: PROJECT.screens, personas: PROJECT.personas } })
-              .eq("project_id", projectId).eq("phase", 6);
-          }
-        }, 300);
-      }
-    }, 380);
-  }
+        setPersonaDocs(persona_docs);
+        setActivePersona(persona_docs[0]?.id ?? "");
+        setDocPhase("complete");
+      })
+      .catch(err => {
+        clearInterval(iv);
+        setApiError(err.message ?? "Failed to generate documentation");
+        setDocPhase("preview");
+      });
+    return () => clearInterval(iv);
+  }, [projectId]);
+
+  const warnings     = collectWarnings(personaDocs);
+  const completeness = personaDocs.length ? overallCompleteness(personaDocs) : 0;
+  const activeData   = personaDocs.find(p => p.id === activePersona) ?? personaDocs[0];
+
+  const statsPersonas = personaDocs.length;
+  const statsModules  = personaDocs.reduce((s, p) => s + p.modules.length, 0);
+  const statsScreens  = personaDocs.reduce((s, p) => s + p.modules.reduce((s2, m) => s2 + m.screens.length, 0), 0);
+  const statsFlows    = personaDocs.reduce((s, p) => s + p.modules.reduce((s2, m) => s2 + m.flows.length, 0), 0);
 
   return (
     <SidebarProvider>
@@ -781,14 +456,14 @@ export default function DesignDocumentation() {
               <div className="h-4 w-px bg-border" />
               <div className="min-w-0">
                 <div className="flex items-center gap-2">
-                  <span className="text-sm font-semibold truncate">{PROJECT.name}</span>
+                  <span className="text-sm font-semibold truncate">Design Documentation</span>
                   <span className="hidden sm:inline text-[10px] text-muted-foreground bg-secondary rounded px-1.5 py-0.5 flex-shrink-0">Phase 06</span>
                 </div>
                 <p className="text-[10px] text-muted-foreground hidden sm:block">Final structured handoff generated from your design system</p>
               </div>
             </div>
             <div className="flex items-center gap-2 flex-shrink-0">
-              {(docPhase === "preview" || docPhase === "complete") && <ExportMenu size="sm" />}
+              {(docPhase === "preview" || docPhase === "complete") && <ExportMenu size="sm" data={personaDocs} />}
               <Button variant="ghost" size="sm" className="h-8 rounded-lg text-xs gap-1.5" onClick={() => navigate(projectId ? `/project/${projectId}/phase/05` : "/dashboard")}>
                 <ArrowLeft className="h-3.5 w-3.5" strokeWidth={1.5} />
                 <span className="hidden sm:inline">UX Copywriting</span>
@@ -801,10 +476,10 @@ export default function DesignDocumentation() {
             <div className="flex items-center justify-between flex-wrap gap-2">
               <StageTracker current={6} />
               <div className="flex items-center gap-4 text-[11px] text-muted-foreground">
-                <span><span className="font-semibold text-foreground">{PROJECT.personas}</span> personas</span>
-                <span><span className="font-semibold text-foreground">{PROJECT.modules}</span> modules</span>
-                <span><span className="font-semibold text-foreground">{PROJECT.screens}</span> screens</span>
-                <span><span className="font-semibold text-foreground">{PROJECT.flows}</span> flows</span>
+                <span><span className="font-semibold text-foreground">{statsPersonas}</span> personas</span>
+                <span><span className="font-semibold text-foreground">{statsModules}</span> modules</span>
+                <span><span className="font-semibold text-foreground">{statsScreens}</span> screens</span>
+                <span><span className="font-semibold text-foreground">{statsFlows}</span> flows</span>
                 <span className={cn("font-semibold", completeness >= 85 ? "text-emerald-600 dark:text-emerald-400" : "text-amber-600 dark:text-amber-400")}>{completeness}%</span>
               </div>
             </div>
@@ -858,7 +533,7 @@ export default function DesignDocumentation() {
                             <div>
                               <p className="text-sm font-semibold text-emerald-900 dark:text-emerald-100">Documentation generated</p>
                               <p className="text-xs text-emerald-700 dark:text-emerald-400 mt-0.5">
-                                {PROJECT.screens} screens · {PROJECT.personas} personas · {PROJECT.modules} modules — ready for BA and engineering handoff
+                                {statsScreens} screens · {statsPersonas} personas · {statsModules} modules — ready for BA and engineering handoff
                               </p>
                             </div>
                           </div>
@@ -866,7 +541,7 @@ export default function DesignDocumentation() {
                             <Button variant="ghost" size="sm" className="h-8 rounded-lg text-xs gap-1.5 text-emerald-700 dark:text-emerald-400 hover:bg-emerald-100 dark:hover:bg-emerald-900/30" onClick={() => navigate("/dashboard")}>
                               <LayoutGrid className="h-3.5 w-3.5" strokeWidth={1.5} />Dashboard
                             </Button>
-                            <ExportMenu size="sm" />
+                            <ExportMenu size="sm" data={personaDocs} />
                           </div>
                         </motion.div>
                       )}
@@ -889,14 +564,12 @@ export default function DesignDocumentation() {
                           </span>
                         </div>
                       </div>
-                      <div className="grid grid-cols-3 sm:grid-cols-6 gap-2">
+                      <div className="grid grid-cols-2 sm:grid-cols-4 gap-2">
                         {[
-                          { label: "Personas",     value: PROJECT.personas     },
-                          { label: "Modules",      value: PROJECT.modules      },
-                          { label: "Screens",      value: PROJECT.screens      },
-                          { label: "Flows",        value: PROJECT.flows        },
-                          { label: "Copy items",   value: PROJECT.copyReviewed },
-                          { label: "Audit issues", value: PROJECT.auditIssues  },
+                          { label: "Personas", value: statsPersonas },
+                          { label: "Modules",  value: statsModules  },
+                          { label: "Screens",  value: statsScreens  },
+                          { label: "Flows",    value: statsFlows    },
                         ].map(({ label, value }) => (
                           <div key={label} className="rounded-xl bg-secondary/50 border border-border p-3 text-center">
                             <p className="text-xl font-bold">{value}</p>
@@ -949,7 +622,7 @@ export default function DesignDocumentation() {
 
                       {/* Persona tabs */}
                       <div className="flex gap-1.5 flex-wrap">
-                        {MOCK_DOC.map(p => (
+                        {personaDocs.map(p => (
                           <button key={p.id} onClick={() => setActivePersona(p.id)} className={cn(
                             "flex items-center gap-2 rounded-xl border px-3 py-2 text-[12px] font-medium transition-all",
                             activePersona === p.id
@@ -994,20 +667,17 @@ export default function DesignDocumentation() {
                       </AnimatePresence>
                     </div>
 
-                    {/* Generate CTA — only in preview state */}
-                    {docPhase === "preview" && (
-                      <div className="rounded-2xl border border-border bg-card p-6 flex flex-col items-center gap-4 text-center">
-                        <div className="h-12 w-12 rounded-2xl bg-secondary flex items-center justify-center">
-                          <Sparkles className="h-5 w-5 text-muted-foreground" strokeWidth={1.5} />
-                        </div>
-                        <div>
-                          <p className="text-sm font-semibold">Ready to generate</p>
-                          <p className="text-xs text-muted-foreground mt-1">All phases are complete. This will compile the final structured handoff document.</p>
-                        </div>
-                        <Button onClick={handleGenerate} className="gradient-accent text-accent-foreground hover:brightness-110 shadow-soft h-11 px-8 rounded-xl font-medium">
-                          Generate Final Documentation
+                    {/* Error state — only shown when generation failed */}
+                    {docPhase === "preview" && apiError && (
+                      <div className="rounded-2xl border border-rose-200 dark:border-rose-800 bg-rose-50 dark:bg-rose-950/20 p-6 flex flex-col items-center gap-4 text-center">
+                        <p className="text-sm font-semibold text-rose-900 dark:text-rose-100">Generation failed</p>
+                        <p className="text-xs text-rose-700 dark:text-rose-400">{apiError}</p>
+                        <Button
+                          onClick={() => { setApiError(null); setDocPhase("generating"); if (projectId) runDocs(projectId, true).then(({ persona_docs }) => { setPersonaDocs(persona_docs); setActivePersona(persona_docs[0]?.id ?? ""); setDocPhase("complete"); }).catch(err => { setApiError(err.message); setDocPhase("preview"); }); }}
+                          className="gradient-accent text-accent-foreground hover:brightness-110 shadow-soft h-9 px-6 rounded-xl text-sm font-medium"
+                        >
+                          Retry
                         </Button>
-                        <p className="text-[11px] text-muted-foreground">Ready for BA and engineering handoff</p>
                       </div>
                     )}
 
@@ -1030,7 +700,7 @@ export default function DesignDocumentation() {
                   <Button variant="ghost" size="sm" className="h-9 rounded-xl text-xs gap-1.5" onClick={() => navigate("/dashboard")}>
                     <LayoutGrid className="h-3.5 w-3.5" strokeWidth={1.5} />Go to Dashboard
                   </Button>
-                  <ExportMenu size="default" />
+                  <ExportMenu size="default" data={personaDocs} />
                 </div>
               </motion.div>
             )}

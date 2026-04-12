@@ -1,6 +1,6 @@
 import { useState, useCallback, useEffect } from "react";
 import { useNavigate, useParams } from "react-router-dom";
-import { supabase } from "@/lib/supabase";
+import { runPersonas, savePersonas, type RichPersona } from "@/lib/api";
 import { SidebarProvider, SidebarTrigger } from "@/components/ui/sidebar";
 import { AppSidebar } from "@/components/dashboard/AppSidebar";
 import { motion, AnimatePresence } from "framer-motion";
@@ -17,6 +17,7 @@ import {
   Download,
   ChevronDown,
   ChevronRight,
+  RefreshCw,
   User,
   Target,
   Frown,
@@ -166,209 +167,47 @@ function StageTracker({ current }: { current: number }) {
   );
 }
 
-// --- Mock Data ---
-const MOCK_PERSONAS: Persona[] = [
-  {
-    id: "p1",
-    name: "Sarah Chen",
-    tag: "Primary",
-    archetype: "The Empowered Manager",
-    status: "confirmed",
-    confidence: 92,
-    identity: {
-      role: "Product Manager leading a cross-functional design team",
-      context: "Uses the platform daily to manage design sprints and coordinate deliverables across teams",
-      accessLevel: "Full",
-      device: "Desktop",
-    },
-    goals: {
-      primary: ["Streamline design-to-dev handoff", "Reduce review cycles by 40%", "Centralize all design assets"],
-      secondary: ["Track team velocity", "Generate stakeholder reports"],
-      emotional: ["Feel in control of project timelines", "Confidence in design quality", "Reduce anxiety around missed deadlines"],
-    },
-    painPoints: {
-      functional: ["Scattered feedback across tools", "Manual status updates", "No single source of truth"],
-      emotional: ["Frustration with misaligned expectations", "Overwhelm from context-switching"],
-      systemGaps: ["No integrated design review workflow", "Lack of automated progress tracking"],
-    },
-    behavior: {
-      frequency: "Daily (5-7x per week)",
-      techProficiency: "Advanced",
-      decisionStyle: "Data-driven, collaborative",
-      triggers: ["New sprint planning", "Design review deadlines", "Stakeholder presentations"],
-    },
-    psychographics: {
-      traits: ["Organized", "Detail-oriented", "Collaborative", "Results-focused"],
-      riskTolerance: "Moderate — prefers proven solutions with measurable outcomes",
-      trustFactors: ["Social proof from similar teams", "Clear ROI metrics", "Transparent pricing"],
-      values: ["Efficiency", "Quality", "Team empowerment", "Transparency"],
-    },
-    journey: {
-      entryPoint: "Team recommendation or G2 review",
-      keyActions: ["Onboard team", "Set up first project", "Run design review", "Generate report"],
-      dropOffRisks: ["Complex onboarding", "Lack of integrations", "Team adoption resistance"],
-      successDefinition: "50% reduction in design review cycle time within first quarter",
-    },
-    businessValue: {
-      revenueImpact: "High — drives team-level subscription",
-      retentionImportance: "Critical — primary decision maker for renewal",
-      priorityScore: 95,
-    },
-    missingData: [],
-    aiRecommendations: ["Strong persona — consider as primary design target"],
-  },
-  {
-    id: "p2",
-    name: "Alex Rivera",
-    tag: "Primary",
-    archetype: "The Hands-On Designer",
-    status: "review",
-    confidence: 78,
-    identity: {
-      role: "Senior UX Designer responsible for end-to-end product design",
-      context: "Works in design tools all day, needs seamless integration with workflow platform",
-      accessLevel: "Full",
-      device: "Desktop",
-    },
-    goals: {
-      primary: ["Faster iteration cycles", "Better design feedback collection", "Automated documentation"],
-      secondary: ["Portfolio building", "Skill development tracking"],
-      emotional: ["Creative freedom without process overhead", "Recognition for design impact"],
-    },
-    painPoints: {
-      functional: ["Too many tool switches", "Manual annotation work", "Inconsistent design tokens"],
-      emotional: ["Burnout from repetitive tasks", "Feeling unheard in product decisions"],
-      systemGaps: ["No AI-assisted design suggestions", "Missing version comparison"],
-    },
-    behavior: {
-      frequency: "Daily (5-7x per week)",
-      techProficiency: "Expert",
-      decisionStyle: "Intuitive, craft-focused",
-      triggers: ["New feature request", "Design system update", "User research findings"],
-    },
-    psychographics: {
-      traits: ["Creative", "Perfectionist", "Independent", "Empathetic"],
-      riskTolerance: "High — willing to try experimental tools",
-      trustFactors: ["Design community endorsement", "Beautiful UI/UX", "Fast performance"],
-      values: ["Craft quality", "User advocacy", "Innovation", "Autonomy"],
-    },
-    journey: {
-      entryPoint: "Dribbble/Twitter discovery or team mandate",
-      keyActions: ["Import design files", "Create personas", "Run UX audit", "Export documentation"],
-      dropOffRisks: ["Slow performance", "Limited Figma integration", "Steep learning curve"],
-      successDefinition: "Reduce documentation time by 60% while maintaining quality",
-    },
-    businessValue: {
-      revenueImpact: "Medium — influences team tool adoption",
-      retentionImportance: "High — daily active user driving engagement metrics",
-      priorityScore: 88,
-    },
-    missingData: ["Emotional drivers need more depth", "Missing salary/budget context"],
-    aiRecommendations: ["Add more emotional driver detail", "Consider merging with 'Junior Designer' if overlap found"],
-  },
-  {
-    id: "p3",
-    name: "Jordan Patel",
-    tag: "Secondary",
-    archetype: "The Strategic Stakeholder",
-    status: "review",
-    confidence: 65,
-    identity: {
-      role: "VP of Product overseeing multiple product lines",
-      context: "Reviews design work monthly, needs high-level visibility without operational detail",
-      accessLevel: "Limited",
-      device: "Hybrid",
-    },
-    goals: {
-      primary: ["Quick visibility into design progress", "Alignment between design and business goals", "ROI on design investment"],
-      secondary: ["Competitive analysis", "Board-ready design metrics"],
-      emotional: ["Confidence in design direction", "Trust in team capability"],
-    },
-    painPoints: {
-      functional: ["Too much detail in reports", "No executive summary view", "Calendar overload for reviews"],
-      emotional: ["Disconnect from design process", "Anxiety about design-market fit"],
-      systemGaps: ["No executive dashboard", "Missing business impact metrics"],
-    },
-    behavior: {
-      frequency: "Weekly (1-2x per week)",
-      techProficiency: "Moderate",
-      decisionStyle: "Strategic, ROI-driven",
-      triggers: ["Board meetings", "Quarterly planning", "Product launches"],
-    },
-    psychographics: {
-      traits: ["Strategic", "Time-constrained", "Results-oriented", "Decisive"],
-      riskTolerance: "Low — needs proven ROI before commitment",
-      trustFactors: ["Case studies from similar companies", "Enterprise security compliance", "Executive references"],
-      values: ["Business impact", "Time efficiency", "Strategic alignment", "Accountability"],
-    },
-    journey: {
-      entryPoint: "Team demo or vendor evaluation",
-      keyActions: ["Review executive dashboard", "Approve design direction", "Share with board"],
-      dropOffRisks: ["Too operational", "No clear ROI view", "Poor mobile experience"],
-      successDefinition: "Clear design-to-business alignment visible in under 5 minutes",
-    },
-    businessValue: {
-      revenueImpact: "High — controls budget allocation",
-      retentionImportance: "Critical — executive sponsor for enterprise deals",
-      priorityScore: 82,
-    },
-    missingData: ["Needs more behavioral data", "Missing competitive context"],
-    aiRecommendations: ["Low confidence — needs more behavioral data", "Consider if this overlaps with 'C-Suite' persona"],
-  },
-  {
-    id: "p4",
-    name: "Morgan Kim",
-    tag: "Edge",
-    archetype: "The External Reviewer",
-    status: "low-confidence",
-    confidence: 42,
-    identity: {
-      role: "Freelance consultant brought in for design audits",
-      context: "Temporary access for specific project phases, needs quick onboarding",
-      accessLevel: "Delegated",
-      device: "Mobile",
-    },
-    goals: {
-      primary: ["Quickly understand project context", "Provide actionable feedback", "Export findings easily"],
-      secondary: ["Build portfolio of client work"],
-      emotional: ["Feel professional and efficient", "Make a strong impression"],
-    },
-    painPoints: {
-      functional: ["Complex onboarding for short engagements", "Limited access to full context"],
-      emotional: ["Feeling like an outsider", "Pressure to deliver quickly"],
-      systemGaps: ["No guest reviewer mode", "Missing quick-start guide"],
-    },
-    behavior: {
-      frequency: "Monthly (2-4x per month)",
-      techProficiency: "Advanced",
-      decisionStyle: "Expert-driven, independent",
-      triggers: ["Client engagement start", "Audit milestone"],
-    },
-    psychographics: {
-      traits: ["Independent", "Efficient", "Expert", "Adaptable"],
-      riskTolerance: "Moderate",
-      trustFactors: ["Quick value demonstration", "Professional UX", "Easy export"],
-      values: ["Professionalism", "Speed", "Flexibility"],
-    },
-    journey: {
-      entryPoint: "Client invitation link",
-      keyActions: ["Accept invite", "Review designs", "Add annotations", "Export report"],
-      dropOffRisks: ["Too much friction to start", "Limited permissions blocking work"],
-      successDefinition: "Complete audit and deliver findings within one session",
-    },
-    businessValue: {
-      revenueImpact: "Low — indirect influence",
-      retentionImportance: "Low — temporary engagement",
-      priorityScore: 35,
-    },
-    missingData: ["Needs full behavioral mapping", "Missing pain point validation", "No psychographic data validated"],
-    aiRecommendations: [
-      "Low confidence — significant data gaps",
-      "Consider if this persona is needed for MVP",
-      "Similar to 'Guest User' pattern — validate need",
-    ],
-  },
-];
+// --- Map API RichPersona → UI Persona ---
+function mapRichToUI(r: RichPersona): Persona {
+  return {
+    id: r.db_id,
+    name: r.name,
+    tag: r.tag ?? "Secondary",
+    archetype: r.archetype ?? "",
+    status: r.confidence >= 80 ? "confirmed" : r.confidence >= 60 ? "review" : "low-confidence",
+    confidence: r.confidence ?? 70,
+    identity: r.identity ?? { role: "", context: "", accessLevel: "Limited", device: "Desktop" },
+    goals: r.goals ?? { primary: [], secondary: [], emotional: [] },
+    painPoints: r.painPoints ?? { functional: [], emotional: [], systemGaps: [] },
+    behavior: r.behavior ?? { frequency: "", techProficiency: "", decisionStyle: "", triggers: [] },
+    psychographics: r.psychographics ?? { traits: [], riskTolerance: "", trustFactors: [], values: [] },
+    journey: r.journey ?? { entryPoint: "", keyActions: [], dropOffRisks: [], successDefinition: "" },
+    businessValue: r.businessValue ?? { revenueImpact: "", retentionImportance: "", priorityScore: 0 },
+    missingData: r.missingData ?? [],
+    aiRecommendations: r.aiRecommendations ?? [],
+  };
+}
+
+function mapUIToRich(p: Persona): RichPersona {
+  return {
+    db_id: p.id,
+    name: p.name,
+    tag: p.tag,
+    archetype: p.archetype,
+    confidence: p.confidence,
+    identity: p.identity,
+    goals: p.goals,
+    painPoints: p.painPoints,
+    behavior: p.behavior,
+    psychographics: p.psychographics,
+    journey: p.journey,
+    businessValue: p.businessValue,
+    missingData: p.missingData,
+    aiRecommendations: p.aiRecommendations,
+  };
+}
+
+// (no static mock data — all personas come from the API)
 
 // --- AI Insight Item ---
 function InsightItem({ icon: Icon, label, type }: { icon: React.ElementType; label: string; type: "warning" | "suggestion" | "info" }) {
@@ -430,22 +269,91 @@ function PersonaSection({
   );
 }
 
-// --- Detail Row ---
-function DetailRow({ label, value }: { label: string; value: string | string[] }) {
+// --- Detail Row (with inline editing) ---
+function DetailRow({
+  label,
+  value,
+  onUpdate,
+}: {
+  label: string;
+  value: string | string[];
+  onUpdate?: (val: string | string[]) => void;
+}) {
+  const [editing, setEditing] = useState(false);
+  const [draft, setDraft] = useState<string>("");
+
+  const startEdit = () => {
+    setDraft(Array.isArray(value) ? value.join("\n") : value);
+    setEditing(true);
+  };
+
+  const handleSave = () => {
+    if (!onUpdate) return;
+    const parsed = Array.isArray(value)
+      ? draft.split("\n").map((s) => s.trim()).filter(Boolean)
+      : draft;
+    onUpdate(parsed);
+    setEditing(false);
+  };
+
+  const handleCancel = () => setEditing(false);
+
   return (
     <div className="py-2">
-      <p className="text-[11px] font-medium text-muted-foreground uppercase tracking-wider mb-1">{label}</p>
-      {Array.isArray(value) ? (
+      <div className="flex items-center justify-between mb-1">
+        <p className="text-[11px] font-medium text-muted-foreground uppercase tracking-wider">{label}</p>
+        {onUpdate && !editing && (
+          <button
+            onClick={startEdit}
+            className="flex items-center gap-1 text-[10px] text-accent/60 hover:text-accent transition-colors shrink-0"
+          >
+            <Pencil className="h-2.5 w-2.5" strokeWidth={2} />
+            Edit
+          </button>
+        )}
+      </div>
+      {editing ? (
+        <div className="space-y-2 mt-1">
+          <Textarea
+            value={draft}
+            onChange={(e) => setDraft(e.target.value)}
+            className="text-sm rounded-lg min-h-[70px] resize-none border-accent/30 focus-visible:ring-accent/40"
+            placeholder={Array.isArray(value) ? "One item per line…" : "Enter value…"}
+            autoFocus
+          />
+          <div className="flex gap-2">
+            <Button
+              size="sm"
+              onClick={handleSave}
+              className="h-7 text-xs rounded-lg gradient-accent text-accent-foreground px-3"
+            >
+              Save
+            </Button>
+            <Button
+              size="sm"
+              variant="ghost"
+              onClick={handleCancel}
+              className="h-7 text-xs rounded-lg px-3"
+            >
+              Cancel
+            </Button>
+          </div>
+        </div>
+      ) : Array.isArray(value) ? (
         <ul className="space-y-1">
-          {value.map((v, i) => (
-            <li key={i} className="text-sm text-foreground flex items-start gap-2">
-              <span className="h-1 w-1 rounded-full bg-accent/50 shrink-0 mt-2" />
-              {v}
-            </li>
-          ))}
+          {(value as string[]).length > 0 ? (
+            (value as string[]).map((v, i) => (
+              <li key={i} className="text-sm text-foreground flex items-start gap-2">
+                <span className="h-1 w-1 rounded-full bg-accent/50 shrink-0 mt-2" />
+                {v}
+              </li>
+            ))
+          ) : (
+            <li className="text-sm text-muted-foreground italic">No data — click Edit to add</li>
+          )}
         </ul>
       ) : (
-        <p className="text-sm text-foreground">{value}</p>
+        <p className="text-sm text-foreground">{value || <span className="italic text-muted-foreground">No data — click Edit to add</span>}</p>
       )}
     </div>
   );
@@ -493,46 +401,28 @@ function DeviceIcon({ device }: { device: string }) {
 const PersonaStudio = () => {
   const navigate = useNavigate();
   const { id: projectId } = useParams<{ id: string }>();
-  const [personas, setPersonas] = useState<Persona[]>(MOCK_PERSONAS);
-  const [selectedId, setSelectedId] = useState<string>(MOCK_PERSONAS[0].id);
+  const [personas, setPersonas] = useState<Persona[]>([]);
+  const [selectedId, setSelectedId] = useState<string>("");
   const [openSections, setOpenSections] = useState<Set<SectionKey>>(new Set(["identity", "goals"]));
   const [deleteDialogId, setDeleteDialogId] = useState<string | null>(null);
   const [showConfirmDialog, setShowConfirmDialog] = useState(false);
-  const [loadingPersonas, setLoadingPersonas] = useState(false);
+  const [generating, setGenerating] = useState(true);
+  const [apiError, setApiError] = useState<string | null>(null);
 
   useEffect(() => {
     if (!projectId) return;
-    setLoadingPersonas(true);
-    supabase
-      .from("personas")
-      .select("*")
-      .eq("project_id", projectId)
-      .then(({ data, error }) => {
-        if (!error && data && data.length > 0) {
-          const mapped: Persona[] = data.map((row) => ({
-            ...MOCK_PERSONAS[0],
-            id: row.id,
-            name: row.name,
-            confidence: row.confidence_score ?? 80,
-            identity: {
-              ...MOCK_PERSONAS[0].identity,
-              role: row.role ?? "",
-            },
-            goals: {
-              ...MOCK_PERSONAS[0].goals,
-              primary: Array.isArray(row.goals) ? row.goals : [],
-            },
-            painPoints: {
-              ...MOCK_PERSONAS[0].painPoints,
-              functional: Array.isArray(row.pain_points) ? row.pain_points : [],
-            },
-            status: "review" as const,
-          }));
-          setPersonas(mapped);
-          setSelectedId(mapped[0].id);
-        }
-        setLoadingPersonas(false);
-      });
+    setGenerating(true);
+    setApiError(null);
+    runPersonas(projectId)
+      .then(({ personas_rich }) => {
+        const mapped = personas_rich.map(mapRichToUI);
+        setPersonas(mapped);
+        if (mapped.length > 0) setSelectedId(mapped[0].id);
+      })
+      .catch((err) => {
+        setApiError(err?.message ?? "Failed to generate personas. Make sure the backend is running on http://localhost:8000");
+      })
+      .finally(() => setGenerating(false));
   }, [projectId]);
 
   const selected = personas.find((p) => p.id === selectedId) || personas[0];
@@ -553,15 +443,58 @@ const PersonaStudio = () => {
     setDeleteDialogId(null);
   };
 
+  const updatePersonaField = useCallback(
+    (personaId: string, section: keyof Persona, field: string, value: string | string[]) => {
+      setPersonas((prev) =>
+        prev.map((p) => {
+          if (p.id !== personaId) return p;
+          const sectionData = p[section];
+          if (typeof sectionData === "object" && sectionData !== null && !Array.isArray(sectionData)) {
+            return { ...p, [section]: { ...(sectionData as object), [field]: value } };
+          }
+          return { ...p, [section]: value };
+        })
+      );
+    },
+    []
+  );
+
+  const togglePersonaConfirmed = useCallback((id: string) => {
+    setPersonas((prev) =>
+      prev.map((p) =>
+        p.id === id
+          ? { ...p, status: p.status === "confirmed" ? "review" : "confirmed" }
+          : p
+      )
+    );
+  }, []);
+
   const handleConfirmPersonas = async () => {
     setShowConfirmDialog(false);
-    if (projectId) {
-      await supabase
-        .from("projects")
-        .update({ current_phase: 2, updated_at: new Date().toISOString() })
-        .eq("id", projectId);
+    if (!projectId) return;
+    try {
+      // Save any edits the designer made back to the backend
+      await savePersonas(projectId, personas.map(mapUIToRich));
+      navigate(`/project/${projectId}/phase/01/journey`);
+    } catch (err) {
+      console.error("Failed to save personas:", err);
+      // Navigate anyway — edits are held in local state
       navigate(`/project/${projectId}/phase/01/journey`);
     }
+  };
+
+  const handleRegenerate = () => {
+    if (!projectId) return;
+    setGenerating(true);
+    setApiError(null);
+    runPersonas(projectId, true)
+      .then(({ personas_rich }) => {
+        const mapped = personas_rich.map(mapRichToUI);
+        setPersonas(mapped);
+        if (mapped.length > 0) setSelectedId(mapped[0].id);
+      })
+      .catch((err) => setApiError(err?.message ?? "Regeneration failed"))
+      .finally(() => setGenerating(false));
   };
 
   const allConfirmed = personas.every((p) => p.status === "confirmed");
@@ -584,7 +517,61 @@ const PersonaStudio = () => {
     insights.push({ icon: Merge, label: `${primaryPersonas.length} primary personas detected — consider merging overlapping roles`, type: "suggestion" });
   }
 
-  const clarityScore = Math.round(personas.reduce((sum, p) => sum + p.confidence, 0) / personas.length);
+  const clarityScore = personas.length > 0
+    ? Math.round(personas.reduce((sum, p) => sum + p.confidence, 0) / personas.length)
+    : 0;
+
+  // ── Loading / Error screens ───────────────────────────────────────────────
+  if (generating) {
+    return (
+      <SidebarProvider>
+        <div className="min-h-screen flex w-full bg-background">
+          <AppSidebar />
+          <div className="flex-1 flex flex-col items-center justify-center gap-4">
+            <div className="h-10 w-10 rounded-xl bg-accent/10 flex items-center justify-center">
+              <Sparkles className="h-5 w-5 text-accent animate-pulse" strokeWidth={1.5} />
+            </div>
+            <div className="text-center">
+              <p className="text-sm font-medium text-foreground">Analysing your PRD…</p>
+              <p className="text-xs text-muted-foreground mt-1">Extracting personas with AI. This takes 15–30 seconds.</p>
+            </div>
+            <div className="flex gap-1 mt-2">
+              {[0, 1, 2].map((i) => (
+                <div key={i} className="h-1.5 w-1.5 rounded-full bg-accent/40 animate-bounce" style={{ animationDelay: `${i * 0.15}s` }} />
+              ))}
+            </div>
+          </div>
+        </div>
+      </SidebarProvider>
+    );
+  }
+
+  if (apiError) {
+    return (
+      <SidebarProvider>
+        <div className="min-h-screen flex w-full bg-background">
+          <AppSidebar />
+          <div className="flex-1 flex flex-col items-center justify-center gap-4 max-w-md mx-auto text-center px-6">
+            <div className="h-10 w-10 rounded-xl bg-destructive/10 flex items-center justify-center">
+              <AlertTriangle className="h-5 w-5 text-destructive" strokeWidth={1.5} />
+            </div>
+            <div>
+              <p className="text-sm font-medium text-foreground">Persona generation failed</p>
+              <p className="text-xs text-muted-foreground mt-1 leading-relaxed">{apiError}</p>
+            </div>
+            <Button
+              size="sm"
+              className="rounded-xl gradient-accent text-accent-foreground text-xs gap-1.5"
+              onClick={handleRegenerate}
+            >
+              <RefreshCw className="h-3.5 w-3.5" strokeWidth={1.5} />
+              Retry
+            </Button>
+          </div>
+        </div>
+      </SidebarProvider>
+    );
+  }
 
   return (
     <SidebarProvider>
@@ -598,7 +585,7 @@ const PersonaStudio = () => {
             <div className="h-5 w-px bg-border" />
 
             {/* Project Name */}
-            <span className="text-sm font-medium text-foreground truncate">Aether Project</span>
+            <span className="text-sm font-medium text-foreground truncate">Persona Studio</span>
 
             {/* PRD Clarity Score */}
             <div className="flex items-center gap-1.5 ml-3">
@@ -610,6 +597,17 @@ const PersonaStudio = () => {
             </div>
 
             <div className="flex-1" />
+
+            {/* Regenerate */}
+            <Button
+              variant="outline"
+              size="sm"
+              className="rounded-xl h-8 text-xs gap-1.5"
+              onClick={handleRegenerate}
+            >
+              <RefreshCw className="h-3.5 w-3.5" strokeWidth={1.5} />
+              Regenerate
+            </Button>
 
             {/* Export */}
             <DropdownMenu>
@@ -654,31 +652,49 @@ const PersonaStudio = () => {
               <ScrollArea className="flex-1">
                 <div className="px-3 pb-3 space-y-1">
                   {personas.map((p) => (
-                    <button
+                    <div
                       key={p.id}
-                      onClick={() => setSelectedId(p.id)}
-                      className={`w-full text-left px-3 py-3 rounded-xl transition-all duration-200 group ${
+                      className={`rounded-xl transition-all duration-200 border ${
                         selectedId === p.id
-                          ? "bg-accent/5 border border-accent/15"
-                          : "hover:bg-secondary/50 border border-transparent"
+                          ? "bg-accent/5 border-accent/15"
+                          : "hover:bg-secondary/50 border-transparent"
                       }`}
                     >
-                      <div className="flex items-start gap-2.5">
-                        <div className={`h-8 w-8 rounded-lg flex items-center justify-center text-xs font-semibold shrink-0 ${
-                          selectedId === p.id ? "bg-accent/10 text-accent" : "bg-secondary text-muted-foreground"
-                        }`}>
-                          {p.name.split(" ").map((n) => n[0]).join("")}
-                        </div>
-                        <div className="flex-1 min-w-0">
-                          <p className="text-sm font-medium text-foreground truncate">{p.name}</p>
-                          <p className="text-[11px] text-muted-foreground truncate mt-0.5">{p.archetype}</p>
-                          <div className="flex items-center gap-2 mt-1.5">
-                            <TagBadge tag={p.tag} />
-                            <StatusBadge status={p.status} />
+                      <button
+                        onClick={() => setSelectedId(p.id)}
+                        className="w-full text-left px-3 pt-3 pb-2"
+                      >
+                        <div className="flex items-start gap-2.5">
+                          <div className={`h-8 w-8 rounded-lg flex items-center justify-center text-xs font-semibold shrink-0 ${
+                            selectedId === p.id ? "bg-accent/10 text-accent" : "bg-secondary text-muted-foreground"
+                          }`}>
+                            {p.name.split(" ").map((n) => n[0]).join("")}
+                          </div>
+                          <div className="flex-1 min-w-0">
+                            <p className="text-sm font-medium text-foreground truncate">{p.name}</p>
+                            <p className="text-[11px] text-muted-foreground truncate mt-0.5">{p.archetype}</p>
+                            <div className="flex items-center gap-2 mt-1.5">
+                              <TagBadge tag={p.tag} />
+                              <StatusBadge status={p.status} />
+                            </div>
                           </div>
                         </div>
+                      </button>
+                      {/* Per-persona confirm toggle */}
+                      <div className="px-3 pb-2.5">
+                        <button
+                          onClick={() => togglePersonaConfirmed(p.id)}
+                          className={`w-full flex items-center justify-center gap-1.5 h-7 rounded-lg text-[11px] font-medium transition-all ${
+                            p.status === "confirmed"
+                              ? "bg-[hsl(var(--success))]/10 text-[hsl(var(--success))] border border-[hsl(var(--success))]/20"
+                              : "bg-secondary text-muted-foreground border border-border/50 hover:border-accent/30 hover:text-accent"
+                          }`}
+                        >
+                          <Check className="h-3 w-3" strokeWidth={2.5} />
+                          {p.status === "confirmed" ? "Confirmed" : "Mark as confirmed"}
+                        </button>
                       </div>
-                    </button>
+                    </div>
                   ))}
                 </div>
               </ScrollArea>
@@ -814,10 +830,10 @@ const PersonaStudio = () => {
                       onToggle={() => toggleSection("identity")}
                     >
                       <div className="space-y-0 divide-y divide-border/30">
-                        <DetailRow label="Role & Responsibilities" value={selected.identity.role} />
-                        <DetailRow label="Context of Use" value={selected.identity.context} />
-                        <DetailRow label="Access Level" value={selected.identity.accessLevel} />
-                        <DetailRow label="Device Preference" value={selected.identity.device} />
+                        <DetailRow label="Role & Responsibilities" value={selected.identity.role} onUpdate={(v) => updatePersonaField(selected.id, "identity", "role", v)} />
+                        <DetailRow label="Context of Use" value={selected.identity.context} onUpdate={(v) => updatePersonaField(selected.id, "identity", "context", v)} />
+                        <DetailRow label="Access Level" value={selected.identity.accessLevel} onUpdate={(v) => updatePersonaField(selected.id, "identity", "accessLevel", v)} />
+                        <DetailRow label="Device Preference" value={selected.identity.device} onUpdate={(v) => updatePersonaField(selected.id, "identity", "device", v)} />
                       </div>
                     </PersonaSection>
 
@@ -828,9 +844,9 @@ const PersonaStudio = () => {
                       onToggle={() => toggleSection("goals")}
                     >
                       <div className="space-y-0 divide-y divide-border/30">
-                        <DetailRow label="Primary Goals" value={selected.goals.primary} />
-                        <DetailRow label="Secondary Goals" value={selected.goals.secondary} />
-                        <DetailRow label="Emotional Drivers" value={selected.goals.emotional} />
+                        <DetailRow label="Primary Goals" value={selected.goals.primary} onUpdate={(v) => updatePersonaField(selected.id, "goals", "primary", v)} />
+                        <DetailRow label="Secondary Goals" value={selected.goals.secondary} onUpdate={(v) => updatePersonaField(selected.id, "goals", "secondary", v)} />
+                        <DetailRow label="Emotional Drivers" value={selected.goals.emotional} onUpdate={(v) => updatePersonaField(selected.id, "goals", "emotional", v)} />
                       </div>
                     </PersonaSection>
 
@@ -841,9 +857,9 @@ const PersonaStudio = () => {
                       onToggle={() => toggleSection("painPoints")}
                     >
                       <div className="space-y-0 divide-y divide-border/30">
-                        <DetailRow label="Functional Issues" value={selected.painPoints.functional} />
-                        <DetailRow label="Emotional Frustrations" value={selected.painPoints.emotional} />
-                        <DetailRow label="System Gaps" value={selected.painPoints.systemGaps} />
+                        <DetailRow label="Functional Issues" value={selected.painPoints.functional} onUpdate={(v) => updatePersonaField(selected.id, "painPoints", "functional", v)} />
+                        <DetailRow label="Emotional Frustrations" value={selected.painPoints.emotional} onUpdate={(v) => updatePersonaField(selected.id, "painPoints", "emotional", v)} />
+                        <DetailRow label="System Gaps" value={selected.painPoints.systemGaps} onUpdate={(v) => updatePersonaField(selected.id, "painPoints", "systemGaps", v)} />
                       </div>
                     </PersonaSection>
 
@@ -854,10 +870,10 @@ const PersonaStudio = () => {
                       onToggle={() => toggleSection("behavior")}
                     >
                       <div className="space-y-0 divide-y divide-border/30">
-                        <DetailRow label="Usage Frequency" value={selected.behavior.frequency} />
-                        <DetailRow label="Tech Proficiency" value={selected.behavior.techProficiency} />
-                        <DetailRow label="Decision-Making Style" value={selected.behavior.decisionStyle} />
-                        <DetailRow label="Triggers" value={selected.behavior.triggers} />
+                        <DetailRow label="Usage Frequency" value={selected.behavior.frequency} onUpdate={(v) => updatePersonaField(selected.id, "behavior", "frequency", v)} />
+                        <DetailRow label="Tech Proficiency" value={selected.behavior.techProficiency} onUpdate={(v) => updatePersonaField(selected.id, "behavior", "techProficiency", v)} />
+                        <DetailRow label="Decision-Making Style" value={selected.behavior.decisionStyle} onUpdate={(v) => updatePersonaField(selected.id, "behavior", "decisionStyle", v)} />
+                        <DetailRow label="Triggers" value={selected.behavior.triggers} onUpdate={(v) => updatePersonaField(selected.id, "behavior", "triggers", v)} />
                       </div>
                     </PersonaSection>
 
@@ -868,10 +884,10 @@ const PersonaStudio = () => {
                       onToggle={() => toggleSection("psychographics")}
                     >
                       <div className="space-y-0 divide-y divide-border/30">
-                        <DetailRow label="Personality Traits" value={selected.psychographics.traits} />
-                        <DetailRow label="Risk Tolerance" value={selected.psychographics.riskTolerance} />
-                        <DetailRow label="Trust Factors" value={selected.psychographics.trustFactors} />
-                        <DetailRow label="Values" value={selected.psychographics.values} />
+                        <DetailRow label="Personality Traits" value={selected.psychographics.traits} onUpdate={(v) => updatePersonaField(selected.id, "psychographics", "traits", v)} />
+                        <DetailRow label="Risk Tolerance" value={selected.psychographics.riskTolerance} onUpdate={(v) => updatePersonaField(selected.id, "psychographics", "riskTolerance", v)} />
+                        <DetailRow label="Trust Factors" value={selected.psychographics.trustFactors} onUpdate={(v) => updatePersonaField(selected.id, "psychographics", "trustFactors", v)} />
+                        <DetailRow label="Values" value={selected.psychographics.values} onUpdate={(v) => updatePersonaField(selected.id, "psychographics", "values", v)} />
                       </div>
                     </PersonaSection>
 
@@ -882,10 +898,10 @@ const PersonaStudio = () => {
                       onToggle={() => toggleSection("journey")}
                     >
                       <div className="space-y-0 divide-y divide-border/30">
-                        <DetailRow label="Entry Point" value={selected.journey.entryPoint} />
-                        <DetailRow label="Key Actions" value={selected.journey.keyActions} />
-                        <DetailRow label="Drop-off Risks" value={selected.journey.dropOffRisks} />
-                        <DetailRow label="Success Definition" value={selected.journey.successDefinition} />
+                        <DetailRow label="Entry Point" value={selected.journey.entryPoint} onUpdate={(v) => updatePersonaField(selected.id, "journey", "entryPoint", v)} />
+                        <DetailRow label="Key Actions" value={selected.journey.keyActions} onUpdate={(v) => updatePersonaField(selected.id, "journey", "keyActions", v)} />
+                        <DetailRow label="Drop-off Risks" value={selected.journey.dropOffRisks} onUpdate={(v) => updatePersonaField(selected.id, "journey", "dropOffRisks", v)} />
+                        <DetailRow label="Success Definition" value={selected.journey.successDefinition} onUpdate={(v) => updatePersonaField(selected.id, "journey", "successDefinition", v)} />
                       </div>
                     </PersonaSection>
 
@@ -896,8 +912,8 @@ const PersonaStudio = () => {
                       onToggle={() => toggleSection("businessValue")}
                     >
                       <div className="space-y-0 divide-y divide-border/30">
-                        <DetailRow label="Revenue Impact" value={selected.businessValue.revenueImpact} />
-                        <DetailRow label="Retention Importance" value={selected.businessValue.retentionImportance} />
+                        <DetailRow label="Revenue Impact" value={selected.businessValue.revenueImpact} onUpdate={(v) => updatePersonaField(selected.id, "businessValue", "revenueImpact", v)} />
+                        <DetailRow label="Retention Importance" value={selected.businessValue.retentionImportance} onUpdate={(v) => updatePersonaField(selected.id, "businessValue", "retentionImportance", v)} />
                         <div className="py-2">
                           <p className="text-[11px] font-medium text-muted-foreground uppercase tracking-wider mb-1">Priority Score</p>
                           <div className="flex items-center gap-2">

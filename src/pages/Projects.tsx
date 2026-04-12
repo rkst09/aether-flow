@@ -9,6 +9,42 @@ import { supabase } from "@/lib/supabase";
 import { useAuth } from "@/contexts/AuthContext";
 import type { Project } from "@/lib/database.types";
 
+// ─── StandaloneProjectCard ────────────────────────────────────────────────────
+
+function StandaloneProjectCard({ project, index, onClick }: { project: Project; index: number; onClick: () => void }) {
+  const isAudit = project.product_type === "ux_audit";
+  const badge = isAudit ? "UX Audit" : "UX Copywriting";
+  const badgeColor = isAudit
+    ? "bg-violet-50 text-violet-700 border-violet-200"
+    : "bg-blue-50 text-blue-700 border-blue-200";
+
+  return (
+    <motion.button
+      onClick={onClick}
+      initial={{ opacity: 0, y: 12 }}
+      animate={{ opacity: 1, y: 0 }}
+      transition={{ delay: index * 0.06, duration: 0.35, ease: "easeOut" }}
+      whileHover={{ scale: 1.01, y: -2 }}
+      className="surface-elevated rounded-xl p-5 shadow-soft text-left hover:shadow-elevated transition-shadow group w-full"
+    >
+      <div className="flex items-center justify-between mb-3">
+        <span className={`text-[10px] font-semibold px-2 py-0.5 rounded-full border ${badgeColor}`}>{badge}</span>
+        <span className="text-[11px] text-muted-foreground">{relativeTime(project.updated_at)}</span>
+      </div>
+      <h3 className="text-sm font-semibold text-foreground mb-1 truncate">{project.name}</h3>
+      {project.description && (
+        <p className="text-[11px] text-muted-foreground leading-relaxed line-clamp-2">{project.description}</p>
+      )}
+      {project.tags?.[0] && (
+        <p className="text-[10px] text-muted-foreground mt-2">{project.tags[0]}</p>
+      )}
+      <p className="text-[11px] font-semibold text-accent mt-3 flex items-center gap-1">
+        View Results <ArrowRight className="h-3 w-3" strokeWidth={2} />
+      </p>
+    </motion.button>
+  );
+}
+
 // ─── Helpers ──────────────────────────────────────────────────────────────────
 
 type PhaseStatus = "done" | "in-progress" | "pending";
@@ -303,21 +339,55 @@ const Projects = () => {
               )}
 
               {/* Projects grid */}
-              {!loading && projects.length > 0 && (
-                <section className="space-y-4">
-                  <h2 className="text-sm font-medium text-foreground">Your Projects</h2>
-                  <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-4">
-                    {projects.map((project, i) => (
-                      <ProjectCard
-                        key={project.id}
-                        project={project}
-                        index={i}
-                        onClick={() => navigate(`/project/${project.id}`)}
-                      />
-                    ))}
-                  </div>
-                </section>
-              )}
+              {!loading && projects.length > 0 && (() => {
+                const standaloneTypes = ["ux_audit", "ux_copywriting"];
+                const pipelineProjects   = projects.filter(p => !standaloneTypes.includes(p.product_type));
+                const standaloneProjects = projects.filter(p => standaloneTypes.includes(p.product_type));
+
+                const handleStandaloneClick = (project: Project) => {
+                  if (project.product_type === "ux_audit") {
+                    navigate(`/tools/ux-audit?project=${project.id}`);
+                  } else {
+                    navigate(`/tools/ux-copywriting?project=${project.id}`);
+                  }
+                };
+
+                return (
+                  <>
+                    {pipelineProjects.length > 0 && (
+                      <section className="space-y-4">
+                        <h2 className="text-sm font-medium text-foreground">Projects</h2>
+                        <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-4">
+                          {pipelineProjects.map((project, i) => (
+                            <ProjectCard
+                              key={project.id}
+                              project={project}
+                              index={i}
+                              onClick={() => navigate(`/project/${project.id}`)}
+                            />
+                          ))}
+                        </div>
+                      </section>
+                    )}
+
+                    {standaloneProjects.length > 0 && (
+                      <section className="space-y-4">
+                        <h2 className="text-sm font-medium text-foreground">Standalone Audits</h2>
+                        <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-4">
+                          {standaloneProjects.map((project, i) => (
+                            <StandaloneProjectCard
+                              key={project.id}
+                              project={project}
+                              index={i}
+                              onClick={() => handleStandaloneClick(project)}
+                            />
+                          ))}
+                        </div>
+                      </section>
+                    )}
+                  </>
+                );
+              })()}
 
             </div>
           </main>

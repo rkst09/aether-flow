@@ -1,14 +1,15 @@
-import { useState, useRef } from "react";
+import { useState, useRef, useEffect } from "react";
 import { useNavigate, useParams } from "react-router-dom";
-import { supabase } from "@/lib/supabase";
+import { runAudit, type RichScreenAudit } from "@/lib/api";
 import { motion, AnimatePresence } from "framer-motion";
 import {
   ArrowLeft, ArrowRight, ChevronDown, ChevronRight,
   Cpu, FileText, Brain, Upload, BookOpen, Search, Layers,
   Download, MousePointer, Zap, AlertCircle, Shield,
-  X, Link2, AlertTriangle, CheckCircle2,
-  FileSpreadsheet, FolderOpen, Sparkles, GitBranch,
-  Users, Monitor, BarChart3, Image as ImageIcon,
+  X, AlertTriangle, CheckCircle2,
+  FileSpreadsheet, GitBranch,
+  Users, Monitor, BarChart3, Image as ImageIcon, ChevronRight as ChevronRightIcon,
+  Sparkles, RefreshCw,
 } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Tooltip, TooltipContent, TooltipTrigger } from "@/components/ui/tooltip";
@@ -23,8 +24,6 @@ import { cn } from "@/lib/utils";
 // ─── Types ────────────────────────────────────────────────────────────────────
 
 type AuditPhase  = "setup" | "running" | "results";
-type Mode        = "project" | "standalone";
-type InputTab    = "upload" | "link";
 type Severity    = "High" | "Medium" | "Low";
 type IssueType   = "usability" | "cognitive" | "interaction" | "emotional" | "system";
 type SevFilter   = "all" | "high" | "medium" | "low";
@@ -73,82 +72,7 @@ const SEVERITY_CONFIG: Record<Severity, { dot: string; badge: string }> = {
   Low:    { dot: "bg-blue-400",  badge: "bg-blue-50 text-blue-700 border border-blue-200 dark:bg-blue-900/30 dark:text-blue-400 dark:border-blue-800"        },
 };
 
-const MOCK_PROJECTS = [
-  { id: "p1", name: "Design System Redesign",  personas: 4, screens: 19, phase: "Phase 03 Complete" },
-  { id: "p2", name: "E-Commerce Platform v2",  personas: 3, screens: 14, phase: "Phase 02 Complete" },
-  { id: "p3", name: "Mobile Banking App",      personas: 5, screens: 22, phase: "Phase 01 Complete" },
-];
 
-const MOCK_AUDIT: ScreenAudit[] = [
-  {
-    id: "s1", name: "Dashboard Overview", score: 74, persona: "Sarah Chen",
-    categories: [
-      { type: "usability", issues: [
-        { id: "u1", severity: "High",   title: "Primary CTA buried below fold",          description: "The main action button requires scrolling to reach, violating the first-screen rule.",                    recommendation: "Elevate the primary CTA to the top third of the viewport — visible without any scrolling."                    },
-        { id: "u2", severity: "Medium", title: "Navigation hierarchy unclear",            description: "Sidebar items carry equal visual weight regardless of access frequency.",                                    recommendation: "Apply visual hierarchy: primary destinations bold and prominent, secondary items at reduced weight."          },
-      ]},
-      { type: "cognitive", issues: [
-        { id: "c1", severity: "High",   title: "12 data points visible simultaneously",  description: "The dashboard exposes all metrics at once, creating a scanning burden and reducing comprehension.",          recommendation: "Apply progressive disclosure — surface 4–6 key metrics first, expand remaining on demand."                   },
-        { id: "c2", severity: "Medium", title: "No visual grouping of related metrics",  description: "Data clusters are not spatially grouped, forcing the user to mentally organise them.",                        recommendation: "Use subtle dividers or whitespace to group related KPIs into logical clusters."                             },
-      ]},
-      { type: "interaction", issues: [
-        { id: "i1", severity: "Medium", title: "Interactive cards have no hover state",  description: "Cards that trigger navigation show no visual affordance — unclear affordance for new users.",                 recommendation: "Add consistent hover state: border highlight, background tint, and cursor change on all clickable cards."    },
-      ]},
-      { type: "emotional", issues: [
-        { id: "e1", severity: "High",   title: "No onboarding guidance for first session", description: "Users arriving to an empty dashboard receive no direction, creating abandonment risk.",                     recommendation: "Add a contextual welcome banner with 2–3 quick-start actions, visible only on first session."              },
-      ]},
-      { type: "system", issues: [
-        { id: "sy1", severity: "High",   title: "Loading state undefined",              description: "Data-loaded sections have no skeleton screen, causing perceived freeze on slow connections.",                   recommendation: "Design and implement skeleton screens for all async content sections."                                    },
-        { id: "sy2", severity: "Medium", title: "Empty state not designed",             description: "When no data exists, sections render blank with no guidance or call to action.",                                recommendation: "Design per-section empty states with a clear label and an actionable CTA."                                 },
-      ]},
-    ],
-  },
-  {
-    id: "s2", name: "Feature Creation Flow", score: 58, persona: "Alex Rivera",
-    categories: [
-      { type: "usability", issues: [
-        { id: "u3", severity: "High",   title: "Form field labels are ambiguous",        description: "Labels like 'Name' and 'Type' are insufficient — users don't know what input is expected.",                  recommendation: "Rewrite with plain language and inline examples: 'Feature name (e.g. User Login)'."                        },
-        { id: "u4", severity: "High",   title: "No step progress indicator",             description: "A 4-step form shows no indication of current position or remaining steps.",                                    recommendation: "Add a step indicator at the top of the form: 'Step 2 of 4' with a visual progress bar."                  },
-        { id: "u5", severity: "High",   title: "Errors shown only on submit",            description: "Inline validation is absent — errors appear only after the user attempts full submission.",                    recommendation: "Implement real-time inline validation — show field errors as the user leaves each field."                   },
-      ]},
-      { type: "cognitive", issues: [
-        { id: "c3", severity: "High",   title: "All 11 fields shown in one view",        description: "A single-screen form with 11 fields imposes maximum cognitive load from the first interaction.",              recommendation: "Restructure into 3–4 logical steps with 3–4 fields each using a clear wizard pattern."                    },
-        { id: "c4", severity: "Medium", title: "Required vs optional indistinguishable", description: "No visual differentiation exists between mandatory and optional fields.",                                       recommendation: "Mark required fields with asterisk; group optional fields in a collapsible secondary section."              },
-      ]},
-      { type: "interaction", issues: [
-        { id: "i2", severity: "High",   title: "CTA label is vague ('Submit')",          description: "'Submit' does not communicate what will happen — users are uncertain of the action's consequence.",           recommendation: "Replace with specific action label: 'Create Feature' or 'Save & Continue'."                                },
-        { id: "i3", severity: "Medium", title: "No keyboard navigation support",         description: "Tab order is inconsistent; some elements are unreachable via keyboard.",                                       recommendation: "Audit and correct tab order; ensure all form elements and CTAs are keyboard-accessible."                    },
-      ]},
-      { type: "emotional", issues: [
-        { id: "e2", severity: "High",   title: "No success feedback after submission",   description: "Form submits without a visible success state, leaving users uncertain whether their action registered.",       recommendation: "Add a dedicated success screen: confirmation + summary of what was created + clear next steps."            },
-        { id: "e3", severity: "Medium", title: "Discard action too easy to trigger",     description: "'Cancel' sits adjacent to 'Submit' with equal visual weight, risking accidental loss of work.",               recommendation: "Add confirmation dialog before discarding: 'Discard changes? This cannot be undone.'"                      },
-      ]},
-      { type: "system", issues: [
-        { id: "sy3", severity: "High",   title: "No autosave mechanism indicated",       description: "Long-form creation has no autosave, exposing users to data loss on refresh or timeout.",                      recommendation: "Implement autosave with visible status indicator: 'Draft saved 2 minutes ago' in the form header."         },
-        { id: "sy4", severity: "Medium", title: "Session timeout not handled",           description: "No handling for session expiry mid-form — data is silently lost.",                                             recommendation: "Detect and warn users of imminent timeout; preserve form data in localStorage as fallback."               },
-      ]},
-    ],
-  },
-  {
-    id: "s3", name: "Settings Page", score: 82, persona: "Jordan Patel",
-    categories: [
-      { type: "usability", issues: [
-        { id: "u6", severity: "Low",    title: "Settings categories need clearer grouping", description: "Unrelated settings are listed together, requiring users to scan a long undifferentiated list.",           recommendation: "Use labelled sections with visual dividers: Account, Notifications, Security, Billing."                   },
-      ]},
-      { type: "cognitive", issues: [
-        { id: "c5", severity: "Medium", title: "Toggle labels describe state, not action",  description: "'Notifications: On/Off' describes the current state rather than the action's outcome.",                   recommendation: "Rewrite to describe outcome: 'Receive email notifications when a feature is updated'."                    },
-      ]},
-      { type: "interaction", issues: [
-        { id: "i4", severity: "High",   title: "No confirmation on critical changes",       description: "Account-level settings take immediate effect with no confirmation — risk of accidental destructive action.", recommendation: "Add a confirmation modal for changes that affect billing, permissions, or data visibility."              },
-        { id: "i5", severity: "Low",    title: "Save button placement inconsistent",        description: "Some sections auto-save; others require explicit save — inconsistent mental model.",                       recommendation: "Standardise: all sections either auto-save with visible status, or all require explicit save action."      },
-      ]},
-      { type: "emotional", issues: [] },
-      { type: "system", issues: [
-        { id: "sy5", severity: "Medium", title: "Reload-required settings not flagged",     description: "Some settings require a page reload to take effect, with no indication of this to the user.",             recommendation: "Add an inline badge on settings that require reload: '⚠ Requires reload to apply'."                       },
-      ]},
-    ],
-  },
-];
 
 // ─── Utilities ────────────────────────────────────────────────────────────────
 
@@ -378,11 +302,12 @@ function IssueCategoryBlock({
 // ─── Screen Audit Card ────────────────────────────────────────────────────────
 
 function ScreenAuditCard({
-  screen, sevFilter, typeFilter,
+  screen, sevFilter, typeFilter, previewUrl,
 }: {
-  screen:     ScreenAudit;
-  sevFilter:  SevFilter;
-  typeFilter: TypeFilter;
+  screen:      ScreenAudit;
+  sevFilter:   SevFilter;
+  typeFilter:  TypeFilter;
+  previewUrl?: string;
 }) {
   const allIssues  = screen.categories.flatMap(c => c.issues);
   const visible    = allIssues.filter(i =>
@@ -441,11 +366,17 @@ function ScreenAuditCard({
         </div>
       </div>
 
-      {/* Screen preview placeholder */}
+      {/* Screen preview */}
       <div className="px-5 py-4 border-b border-border/40">
-        <div className="aspect-video rounded-xl bg-secondary/40 border border-border/30 flex flex-col items-center justify-center gap-2">
-          <Monitor className="h-8 w-8 text-muted-foreground/30" strokeWidth={1} />
-          <span className="text-xs text-muted-foreground/60">{screen.name}</span>
+        <div className="aspect-video rounded-xl bg-secondary/40 border border-border/30 overflow-hidden flex items-center justify-center">
+          {previewUrl ? (
+            <img src={previewUrl} alt={screen.name} className="w-full h-full object-contain" />
+          ) : (
+            <div className="flex flex-col items-center justify-center gap-2">
+              <Monitor className="h-8 w-8 text-muted-foreground/30" strokeWidth={1} />
+              <span className="text-xs text-muted-foreground/60">{screen.name}</span>
+            </div>
+          )}
         </div>
       </div>
 
@@ -538,43 +469,41 @@ const UXAudit = () => {
   const navigate = useNavigate();
   const { id: routeProjectId } = useParams<{ id: string }>();
 
-  // Mode & setup
-  const [mode,        setMode]        = useState<Mode>("project");
-  const [projectId,   setProjectId]   = useState<string>("p1");
-  const [standName,   setStandName]   = useState("");
-  const [standDesc,   setStandDesc]   = useState("");
-  const [standIndustry, setStandIndustry] = useState("");
-  const [standType,   setStandType]   = useState("");
-
-  // Input
-  const [inputTab,    setInputTab]    = useState<InputTab>("upload");
-  const [files,       setFiles]       = useState<File[]>([]);
-  const [linkValue,   setLinkValue]   = useState("");
+  // Input state
+  const [files,         setFiles]         = useState<File[]>([]);
+  const [contextValue,  setContextValue]  = useState("");
+  const [previews,      setPreviews]      = useState<Record<string, string>>({});
 
   // Audit state
   const [auditPhase,  setAuditPhase]  = useState<AuditPhase>("setup");
   const [sevFilter,   setSevFilter]   = useState<SevFilter>("all");
   const [typeFilter,  setTypeFilter]  = useState<TypeFilter>("all");
+  const [auditData,   setAuditData]   = useState<ScreenAudit[]>([]);
+  const [apiError,    setApiError]    = useState<string | null>(null);
 
-  const selectedProject = MOCK_PROJECTS.find(p => p.id === projectId)!;
-
-  const isLinkValid = linkValue.startsWith("http://") || linkValue.startsWith("https://");
-  const hasInput    = files.length > 0 || isLinkValid;
-  const canRun      = hasInput && (
-    mode === "project"
-      ? !!projectId
-      : standName.trim().length > 0 && standDesc.trim().length > 0
-  );
+  const hasInput = files.length > 0;
 
   const handleRunAudit = () => {
+    if (!hasInput) return;
+    // Build preview URLs before files are consumed by fetch
+    const previewMap: Record<string, string> = {};
+    files.forEach(f => {
+      const name = f.name.replace(/\.[^/.]+$/, "");
+      previewMap[name] = URL.createObjectURL(f);
+    });
+    setPreviews(prev => { Object.values(prev).forEach(u => URL.revokeObjectURL(u)); return previewMap; });
     setAuditPhase("running");
-    setTimeout(() => setAuditPhase("results"), 2500);
+    setApiError(null);
+    runAudit(routeProjectId ?? "", files, "", contextValue)
+      .then(res => { setAuditData(res.audit_rich as ScreenAudit[]); setAuditPhase("results"); })
+      .catch(err => { setApiError(err?.message ?? "Audit failed. Make sure backend is running on http://localhost:8000"); setAuditPhase("setup"); });
   };
 
-  const allIssues  = getAllIssues(MOCK_AUDIT);
-  const highCount  = allIssues.filter(i => i.severity === "High").length;
-  const avgScore   = Math.round(MOCK_AUDIT.reduce((a, s) => a + s.score, 0) / MOCK_AUDIT.length);
-  const worstScreen = MOCK_AUDIT.reduce((a, b) => a.score < b.score ? a : b);
+  const allIssues   = getAllIssues(auditData);
+  const highCount   = allIssues.filter(i => i.severity === "High").length;
+  const avgScore    = auditData.length ? Math.round(auditData.reduce((a, s) => a + s.score, 0) / auditData.length) : 0;
+  const worstScreen = auditData.length ? auditData.reduce((a, b) => a.score < b.score ? a : b) : null;
+
 
   return (
     <SidebarProvider>
@@ -586,16 +515,19 @@ const UXAudit = () => {
           <header className="h-14 flex items-center border-b border-border px-6 gap-3 shrink-0 bg-background/95 backdrop-blur supports-[backdrop-filter]:bg-background/80">
             <SidebarTrigger className="text-muted-foreground hover:text-foreground shrink-0" />
             <div className="h-4 w-px bg-border shrink-0" />
-            <span className="text-sm font-semibold text-foreground">Aether Platform</span>
-            <div className="h-4 w-px bg-border shrink-0 hidden sm:block" />
-            <span className="text-xs font-medium text-foreground hidden sm:block">Phase 04</span>
-            <span className="text-xs text-muted-foreground hidden md:block">— UX Audit</span>
+            <nav className="flex items-center gap-1.5 text-xs">
+              <span className="text-muted-foreground">Aether Platform</span>
+              <ChevronRightIcon className="h-3 w-3 text-muted-foreground/40" strokeWidth={1.5} />
+              <span className="text-muted-foreground">Phase 04</span>
+              <ChevronRightIcon className="h-3 w-3 text-muted-foreground/40" strokeWidth={1.5} />
+              <span className="font-semibold text-foreground">UX Audit</span>
+            </nav>
 
             <div className="ml-auto flex items-center gap-2 shrink-0">
               <Button variant="ghost" size="sm" onClick={() => navigate(routeProjectId ? `/project/${routeProjectId}/phase/03` : "/dashboard")}
                 className="h-8 rounded-lg text-xs gap-1.5">
                 <ArrowLeft className="h-3.5 w-3.5" strokeWidth={1.5} />
-                Back to Prototype
+                Back
               </Button>
 
               {auditPhase === "results" && (
@@ -608,12 +540,12 @@ const UXAudit = () => {
                   </DropdownMenuTrigger>
                   <DropdownMenuContent align="end" className="w-52">
                     <DropdownMenuLabel className="text-[11px] text-muted-foreground font-normal">Audit Report</DropdownMenuLabel>
-                    <DropdownMenuItem onClick={() => exportFullExcel(MOCK_AUDIT)} className="text-xs gap-2">
+                    <DropdownMenuItem onClick={() => exportFullExcel(auditData)} className="text-xs gap-2">
                       <FileSpreadsheet className="h-3.5 w-3.5 text-emerald-600" strokeWidth={1.5} />
                       Full Audit — Excel
                     </DropdownMenuItem>
                     <DropdownMenuSeparator />
-                    <DropdownMenuItem onClick={() => exportSummaryPDF(MOCK_AUDIT)} className="text-xs gap-2">
+                    <DropdownMenuItem onClick={() => exportSummaryPDF(auditData)} className="text-xs gap-2">
                       <FileText className="h-3.5 w-3.5 text-rose-500" strokeWidth={1.5} />
                       Summary Report — PDF
                     </DropdownMenuItem>
@@ -621,25 +553,32 @@ const UXAudit = () => {
                 </DropdownMenu>
               )}
 
-              <Button
-                size="sm"
-                onClick={auditPhase === "setup" ? handleRunAudit : async () => { if (routeProjectId) { await supabase.from("projects").update({ current_phase: 7, updated_at: new Date().toISOString() }).eq("id", routeProjectId); } navigate(routeProjectId ? `/project/${routeProjectId}/phase/05` : "/dashboard"); }}
-                disabled={auditPhase === "setup" && !canRun}
-                className={cn(
-                  "h-8 rounded-lg text-xs gap-1.5",
-                  auditPhase === "results"
-                    ? "gradient-accent text-accent-foreground hover:brightness-110 shadow-soft"
-                    : canRun
+              {auditPhase === "setup" && (
+                <Button
+                  size="sm"
+                  onClick={handleRunAudit}
+                  disabled={!hasInput}
+                  className={cn(
+                    "h-8 rounded-lg text-xs gap-1.5",
+                    hasInput
                       ? "gradient-accent text-accent-foreground hover:brightness-110 shadow-soft"
                       : "opacity-40 cursor-not-allowed",
-                )}
-              >
-                {auditPhase === "results" ? (
-                  <>Proceed to UX Copy <ArrowRight className="h-3.5 w-3.5" strokeWidth={1.5} /></>
-                ) : (
-                  <>Run Audit <Search className="h-3.5 w-3.5" strokeWidth={1.5} /></>
-                )}
-              </Button>
+                  )}
+                >
+                  <Search className="h-3.5 w-3.5" strokeWidth={1.5} />
+                  Analyze My Screens
+                </Button>
+              )}
+              {auditPhase === "results" && (
+                <Button
+                  size="sm"
+                  onClick={() => navigate(routeProjectId ? `/project/${routeProjectId}/phase/05` : "/dashboard", { state: { files } })}
+                  className="h-8 rounded-lg text-xs gap-1.5 gradient-accent text-accent-foreground hover:brightness-110 shadow-soft"
+                >
+                  Proceed to UX Copy
+                  <ArrowRight className="h-3.5 w-3.5" strokeWidth={1.5} />
+                </Button>
+              )}
             </div>
           </header>
 
@@ -652,182 +591,81 @@ const UXAudit = () => {
           <div className="flex-1 overflow-y-auto">
             <div className="max-w-4xl mx-auto px-6 py-6 space-y-5">
 
-              {/* ── Setup Section (always visible, collapses to summary in results) ── */}
               <AnimatePresence mode="wait">
-                {auditPhase !== "results" ? (
-
+                {auditPhase === "setup" && (
                   <motion.div key="setup" initial={{ opacity: 0, y: 4 }} animate={{ opacity: 1, y: 0 }} exit={{ opacity: 0 }} transition={{ duration: 0.15 }} className="space-y-4">
 
-                    {/* Mode selector + context */}
-                    <div className="rounded-2xl border border-border/60 bg-background overflow-hidden">
-                      <div className="px-5 py-4 border-b border-border/40 flex items-center gap-3 flex-wrap">
-                        <p className="text-xs font-semibold text-foreground">Audit Source</p>
-                        <div className="flex items-center gap-1 rounded-xl bg-secondary p-1">
-                          <button onClick={() => setMode("project")}
-                            className={cn("flex items-center gap-1.5 rounded-lg px-3 py-1 text-xs font-medium transition-colors",
-                              mode === "project" ? "bg-background text-foreground shadow-sm" : "text-muted-foreground hover:text-foreground")}>
-                            <FolderOpen className="h-3.5 w-3.5" strokeWidth={1.5} />From Project
-                          </button>
-                          <button onClick={() => setMode("standalone")}
-                            className={cn("flex items-center gap-1.5 rounded-lg px-3 py-1 text-xs font-medium transition-colors",
-                              mode === "standalone" ? "bg-background text-foreground shadow-sm" : "text-muted-foreground hover:text-foreground")}>
-                            <Sparkles className="h-3.5 w-3.5" strokeWidth={1.5} />New Audit
-                          </button>
-                        </div>
-                      </div>
+                    {/* Hero context */}
+                    <div className="space-y-1">
+                      <h2 className="text-base font-semibold text-foreground">Audit your product experience</h2>
+                      <p className="text-xs text-muted-foreground">
+                        Upload your screens or paste a product link. Aether will analyze usability, clarity, and interaction quality.
+                      </p>
+                    </div>
 
-                      <div className="px-5 py-4">
-                        <AnimatePresence mode="wait">
-                          {mode === "project" ? (
-                            <motion.div key="project" initial={{ opacity: 0 }} animate={{ opacity: 1 }} exit={{ opacity: 0 }} transition={{ duration: 0.12 }} className="space-y-3">
-                              {/* Project dropdown */}
-                              <div className="space-y-1.5">
-                                <label className="text-[10px] font-semibold uppercase tracking-widest text-muted-foreground">Select Project</label>
-                                <select
-                                  value={projectId}
-                                  onChange={e => setProjectId(e.target.value)}
-                                  className="w-full max-w-sm rounded-xl border border-border/60 bg-background px-3 py-2 text-sm text-foreground outline-none focus:border-foreground/30 transition-colors cursor-pointer"
-                                >
-                                  {MOCK_PROJECTS.map(p => (
-                                    <option key={p.id} value={p.id}>{p.name}</option>
-                                  ))}
-                                </select>
-                              </div>
-                              {/* Context pills */}
-                              <div className="flex items-center gap-2 flex-wrap">
-                                <div className="flex items-center gap-1.5 text-[11px] text-muted-foreground bg-secondary rounded-full px-3 py-1">
-                                  <Users className="h-3 w-3" strokeWidth={1.5} />
-                                  {selectedProject.personas} Personas
-                                </div>
-                                <div className="flex items-center gap-1.5 text-[11px] text-muted-foreground bg-secondary rounded-full px-3 py-1">
-                                  <Monitor className="h-3 w-3" strokeWidth={1.5} />
-                                  {selectedProject.screens} Screens
-                                </div>
-                                <div className="flex items-center gap-1.5 text-[11px] text-muted-foreground bg-secondary rounded-full px-3 py-1">
-                                  <GitBranch className="h-3 w-3" strokeWidth={1.5} />
-                                  {selectedProject.phase}
-                                </div>
-                              </div>
-                            </motion.div>
-                          ) : (
-                            <motion.div key="standalone" initial={{ opacity: 0 }} animate={{ opacity: 1 }} exit={{ opacity: 0 }} transition={{ duration: 0.12 }} className="grid grid-cols-1 sm:grid-cols-2 gap-3">
-                              <div className="space-y-1.5 sm:col-span-2">
-                                <label className="text-[10px] font-semibold uppercase tracking-widest text-muted-foreground">Project Name <span className="text-rose-500">*</span></label>
-                                <input value={standName} onChange={e => setStandName(e.target.value)}
-                                  placeholder="e.g. Mobile Banking App"
-                                  className="w-full rounded-xl border border-border/60 bg-background px-3 py-2 text-sm text-foreground placeholder:text-muted-foreground/50 outline-none focus:border-foreground/30 transition-colors" />
-                              </div>
-                              <div className="space-y-1.5 sm:col-span-2">
-                                <label className="text-[10px] font-semibold uppercase tracking-widest text-muted-foreground">Description <span className="text-rose-500">*</span></label>
-                                <textarea value={standDesc} onChange={e => setStandDesc(e.target.value)}
-                                  placeholder="What product are you auditing and what should the audit focus on?"
-                                  rows={2}
-                                  className="w-full rounded-xl border border-border/60 bg-background px-3 py-2 text-sm text-foreground placeholder:text-muted-foreground/50 outline-none focus:border-foreground/30 resize-none transition-colors" />
-                              </div>
-                              <div className="space-y-1.5">
-                                <label className="text-[10px] font-semibold uppercase tracking-widest text-muted-foreground">Industry</label>
-                                <select value={standIndustry} onChange={e => setStandIndustry(e.target.value)}
-                                  className="w-full rounded-xl border border-border/60 bg-background px-3 py-2 text-sm text-foreground outline-none focus:border-foreground/30 transition-colors cursor-pointer">
-                                  <option value="">Select industry</option>
-                                  {["SaaS","E-Commerce","FinTech","HealthTech","EdTech","Enterprise Tools","Consumer App"].map(v => <option key={v}>{v}</option>)}
-                                </select>
-                              </div>
-                              <div className="space-y-1.5">
-                                <label className="text-[10px] font-semibold uppercase tracking-widest text-muted-foreground">Product Type</label>
-                                <select value={standType} onChange={e => setStandType(e.target.value)}
-                                  className="w-full rounded-xl border border-border/60 bg-background px-3 py-2 text-sm text-foreground outline-none focus:border-foreground/30 transition-colors cursor-pointer">
-                                  <option value="">Select type</option>
-                                  {["Web App","Mobile App","Dashboard","API Tool","Design System","E-Commerce Store"].map(v => <option key={v}>{v}</option>)}
-                                </select>
-                              </div>
-                            </motion.div>
-                          )}
-                        </AnimatePresence>
+                    {/* Input method */}
+                    <div className="rounded-2xl border border-border/60 bg-background overflow-hidden">
+                      <div className="p-5 space-y-3">
+                        <UploadZone files={files} onFiles={setFiles} />
+                        <p className="text-[11px] text-muted-foreground text-center">
+                          Upload the screens you want audited (PNG, JPG, PDF) · Aether analyzes only what you provide — no assumptions
+                        </p>
                       </div>
                     </div>
 
-                    {/* Input section */}
-                    <div className="rounded-2xl border border-border/60 bg-background overflow-hidden">
-                      <div className="border-b border-border/40 flex">
-                        {([["upload","Upload Screens"],["link","Paste Link"]] as [InputTab, string][]).map(([tab, label]) => (
-                          <button key={tab} onClick={() => setInputTab(tab)}
-                            className={cn("flex-1 py-3 text-xs font-medium transition-colors border-b-2",
-                              inputTab === tab
-                                ? "border-foreground text-foreground"
-                                : "border-transparent text-muted-foreground hover:text-foreground hover:border-border/60")}>
-                            {label}
-                          </button>
-                        ))}
-                      </div>
-                      <div className="p-5">
-                        <AnimatePresence mode="wait">
-                          {inputTab === "upload" ? (
-                            <motion.div key="upload" initial={{ opacity: 0 }} animate={{ opacity: 1 }} exit={{ opacity: 0 }} transition={{ duration: 0.1 }}>
-                              <UploadZone files={files} onFiles={setFiles} />
-                            </motion.div>
-                          ) : (
-                            <motion.div key="link" initial={{ opacity: 0 }} animate={{ opacity: 1 }} exit={{ opacity: 0 }} transition={{ duration: 0.1 }} className="space-y-3">
-                              <div className="flex items-center gap-2">
-                                <div className={cn("flex-1 flex items-center gap-2 rounded-xl border px-3 py-2.5 transition-colors",
-                                  linkValue && !isLinkValid ? "border-rose-400/60 bg-rose-50/30 dark:bg-rose-950/10" :
-                                  isLinkValid ? "border-emerald-400/60 bg-emerald-50/30 dark:bg-emerald-950/10" :
-                                  "border-border/60 bg-background")}>
-                                  <Link2 className="h-4 w-4 text-muted-foreground shrink-0" strokeWidth={1.5} />
-                                  <input
-                                    value={linkValue} onChange={e => setLinkValue(e.target.value)}
-                                    placeholder="https://your-product.com or Figma prototype link"
-                                    className="flex-1 text-sm text-foreground placeholder:text-muted-foreground/50 bg-transparent outline-none"
-                                  />
-                                  {isLinkValid && <CheckCircle2 className="h-4 w-4 text-emerald-500 shrink-0" strokeWidth={1.5} />}
-                                  {linkValue && !isLinkValid && <AlertTriangle className="h-4 w-4 text-rose-400 shrink-0" strokeWidth={1.5} />}
-                                </div>
-                              </div>
-                              {linkValue && !isLinkValid && (
-                                <p className="text-[11px] text-rose-500">Enter a valid URL starting with https://</p>
-                              )}
-                              <p className="text-xs text-muted-foreground">Supports live web apps, Figma prototypes, and staging URLs.</p>
-                            </motion.div>
-                          )}
-                        </AnimatePresence>
-                      </div>
+                    {/* Optional context */}
+                    <div className="space-y-1.5">
+                      <label className="text-xs font-semibold text-foreground">Describe your product <span className="text-muted-foreground font-normal">(optional)</span></label>
+                      <textarea
+                        value={contextValue}
+                        onChange={e => setContextValue(e.target.value)}
+                        placeholder="E.g. B2B SaaS dashboard for finance teams — helps users manage invoices and track spend..."
+                        rows={3}
+                        className="w-full text-sm text-foreground placeholder:text-muted-foreground/50 bg-background border border-border/60 rounded-xl px-4 py-3 resize-none outline-none focus:border-foreground/30 transition-colors leading-relaxed"
+                      />
+                      <p className="text-[11px] text-muted-foreground">Helps Aether understand context and generate more accurate findings.</p>
                     </div>
 
-                    {/* Run Audit CTA */}
+                    {/* CTA */}
                     <Button
                       onClick={handleRunAudit}
-                      disabled={!canRun}
+                      disabled={!hasInput}
                       className={cn(
                         "w-full h-11 rounded-xl text-sm gap-2",
-                        canRun
+                        hasInput
                           ? "gradient-accent text-accent-foreground hover:brightness-110 shadow-soft"
                           : "opacity-40 cursor-not-allowed",
                       )}
                     >
                       <Search className="h-4 w-4" strokeWidth={1.5} />
-                      Run UX Audit
+                      Analyze My Screens
                     </Button>
 
-                    {!canRun && (
-                      <p className="text-center text-[11px] text-muted-foreground">
-                        {mode === "standalone" && !standName
-                          ? "Enter a project name and description to continue"
-                          : "Upload at least one screen or enter a product link"}
-                      </p>
+                    <p className="text-center text-[11px] text-muted-foreground">
+                      {hasInput
+                        ? "Aether analyzes only what you provide — no assumptions"
+                        : "Upload at least one screen or paste a product link to continue"
+                      }
+                    </p>
+
+                    {apiError && (
+                      <div className="flex items-start gap-2 rounded-xl border border-rose-200/60 bg-rose-50/60 dark:bg-rose-950/20 px-4 py-3">
+                        <AlertTriangle className="h-4 w-4 text-rose-500 mt-0.5 shrink-0" strokeWidth={1.5} />
+                        <p className="text-xs text-rose-700 dark:text-rose-400">{apiError}</p>
+                      </div>
                     )}
 
                   </motion.div>
+                )}
 
-                ) : auditPhase === "running" ? (
-
+                {auditPhase === "running" && (
                   <motion.div key="running" initial={{ opacity: 0 }} animate={{ opacity: 1 }} exit={{ opacity: 0 }} transition={{ duration: 0.2 }}
                     className="flex flex-col items-center justify-center py-24 gap-5 text-muted-foreground">
-                    <div className="relative">
-                      <div className="h-16 w-16 rounded-2xl bg-secondary flex items-center justify-center">
-                        <Search className="h-7 w-7 text-foreground animate-pulse" strokeWidth={1} />
-                      </div>
+                    <div className="h-16 w-16 rounded-2xl bg-secondary flex items-center justify-center">
+                      <Search className="h-7 w-7 text-foreground animate-pulse" strokeWidth={1} />
                     </div>
                     <div className="text-center space-y-1.5">
-                      <p className="text-sm font-semibold text-foreground">Analysing screens…</p>
+                      <p className="text-sm font-semibold text-foreground">Analysing experience…</p>
                       <p className="text-xs text-muted-foreground">Evaluating usability, cognitive load, interactions, and system gaps</p>
                     </div>
                     <div className="flex items-center gap-1.5">
@@ -839,33 +677,32 @@ const UXAudit = () => {
                       ))}
                     </div>
                   </motion.div>
+                )}
 
-                ) : (
-
-                  /* Results mode: compact context strip */
-                  <motion.div key="results-context" initial={{ opacity: 0, y: 4 }} animate={{ opacity: 1, y: 0 }} transition={{ duration: 0.15 }}>
+                {auditPhase === "results" && (
+                  <motion.div key="results" initial={{ opacity: 0, y: 4 }} animate={{ opacity: 1, y: 0 }} transition={{ duration: 0.15 }}>
 
                     {/* Intelligence banner */}
                     <div className="rounded-2xl border border-amber-200/60 dark:border-amber-800/30 bg-amber-50/60 dark:bg-amber-950/20 px-5 py-4 flex items-start gap-3 mb-5">
                       <AlertTriangle className="h-4 w-4 text-amber-600 dark:text-amber-400 mt-0.5 shrink-0" strokeWidth={1.5} />
                       <div className="flex-1 min-w-0">
-                        <p className="text-sm font-semibold text-foreground">Audit complete — {allIssues.length} issues found across {MOCK_AUDIT.length} screens</p>
+                        <p className="text-sm font-semibold text-foreground">Audit complete — {allIssues.length} issues found across {auditData.length} screens</p>
                         <p className="text-xs text-muted-foreground mt-0.5">
-                          Critical focus: <span className="font-medium text-foreground">{worstScreen.name}</span> requires immediate attention (UX score: {worstScreen.score}/100) · {highCount} high-severity issues need resolution before launch
+                          {worstScreen ? <>Critical focus: <span className="font-medium text-foreground">{worstScreen.name}</span> requires immediate attention (UX score: {worstScreen.score}/100) · </> : null}{highCount} high-severity issues need resolution before launch
                         </p>
                       </div>
                       <Button variant="ghost" size="sm" onClick={() => setAuditPhase("setup")}
                         className="h-7 rounded-lg text-[11px] text-muted-foreground hover:text-foreground shrink-0">
-                        New Audit
+                        Re-run
                       </Button>
                     </div>
 
                     {/* Summary stats */}
                     <div className="grid grid-cols-2 sm:grid-cols-4 gap-3 mb-5">
                       {[
-                        { label: "Total Issues",    value: allIssues.length, icon: AlertCircle, sub: `${MOCK_AUDIT.length} screens`        },
+                        { label: "Total Issues",    value: allIssues.length, icon: AlertCircle, sub: `${auditData.length} screens`        },
                         { label: "High Severity",   value: highCount,        icon: AlertTriangle, sub: "require immediate fix", accent: true },
-                        { label: "Screens Audited", value: MOCK_AUDIT.length, icon: Monitor,      sub: "in this project"                    },
+                        { label: "Screens Audited", value: auditData.length, icon: Monitor,      sub: "in this project"                    },
                         { label: "Avg UX Score",    value: `${avgScore}/100`, icon: BarChart3,    sub: "across all screens"                 },
                       ].map((stat, i) => (
                         <motion.div key={stat.label} initial={{ opacity: 0, y: 6 }} animate={{ opacity: 1, y: 0 }} transition={{ delay: i * 0.05 }}
@@ -908,15 +745,16 @@ const UXAudit = () => {
 
                     {/* Screen audit cards */}
                     <div className="space-y-4">
-                      {MOCK_AUDIT.map(screen => (
+                      {auditData.map(screen => (
                         <ScreenAuditCard
                           key={screen.id}
                           screen={screen}
                           sevFilter={sevFilter}
                           typeFilter={typeFilter}
+                          previewUrl={previews[screen.name]}
                         />
                       ))}
-                      {MOCK_AUDIT.every(s => {
+                      {auditData.every(s => {
                         const vis = s.categories.flatMap(c => c.issues).filter(i =>
                           (sevFilter === "all" || i.severity.toLowerCase() === sevFilter) &&
                           (typeFilter === "all" || s.categories.find(c => c.type === typeFilter)?.issues.includes(i))
@@ -933,6 +771,7 @@ const UXAudit = () => {
 
                   </motion.div>
                 )}
+
               </AnimatePresence>
 
             </div>
@@ -960,19 +799,19 @@ const UXAudit = () => {
                     </DropdownMenuTrigger>
                     <DropdownMenuContent align="end" className="w-52">
                       <DropdownMenuLabel className="text-[11px] text-muted-foreground font-normal">Export Audit</DropdownMenuLabel>
-                      <DropdownMenuItem onClick={() => exportFullExcel(MOCK_AUDIT)} className="text-xs gap-2">
+                      <DropdownMenuItem onClick={() => exportFullExcel(auditData)} className="text-xs gap-2">
                         <FileSpreadsheet className="h-3.5 w-3.5 text-emerald-600" strokeWidth={1.5} />
                         Full Audit — Excel
                       </DropdownMenuItem>
                       <DropdownMenuSeparator />
-                      <DropdownMenuItem onClick={() => exportSummaryPDF(MOCK_AUDIT)} className="text-xs gap-2">
+                      <DropdownMenuItem onClick={() => exportSummaryPDF(auditData)} className="text-xs gap-2">
                         <FileText className="h-3.5 w-3.5 text-rose-500" strokeWidth={1.5} />
                         Summary Report — PDF
                       </DropdownMenuItem>
                     </DropdownMenuContent>
                   </DropdownMenu>
                   <Button
-                    onClick={async () => { if (routeProjectId) { await supabase.from("projects").update({ current_phase: 7, updated_at: new Date().toISOString() }).eq("id", routeProjectId); } navigate(routeProjectId ? `/project/${routeProjectId}/phase/05` : "/dashboard"); }}
+                    onClick={() => navigate(routeProjectId ? `/project/${routeProjectId}/phase/05` : "/dashboard", { state: { files } })}
                     className="h-10 rounded-xl text-sm gap-1.5 gradient-accent text-accent-foreground hover:brightness-110 shadow-soft"
                   >
                     Proceed to UX Copywriting

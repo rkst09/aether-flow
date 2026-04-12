@@ -22,3 +22,11 @@ dist-ssr
 *.njsproj
 *.sln
 *.sw?
+
+# Secrets & local config
+.env
+.env.*
+
+# Claude & OMC state
+.claude/
+.omc/
