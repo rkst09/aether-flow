@@ -1,8 +1,10 @@
 import uuid as uuid_lib
-from fastapi import APIRouter, HTTPException
+from fastapi import APIRouter, Depends, HTTPException
 from pydantic import BaseModel
+from auth import get_current_user, get_project_for_user
 from database import get_supabase
 from services.openai_client import chat_json
+from services.pipeline_normalizers import normalize_journeys
 from services.prd_extractor import fetch_prd_text
 
 router = APIRouter()
@@ -14,13 +16,10 @@ class PhaseRequest(BaseModel):
 
 
 @router.post("")
-async def run_journey(req: PhaseRequest):
+async def run_journey(req: PhaseRequest, user=Depends(get_current_user)):
     db = get_supabase()
 
-    res = db.table("projects").select("*").eq("id", req.project_id).single().execute()
-    if not res.data:
-        raise HTTPException(404, "Project not found")
-    project = res.data
+    project = get_project_for_user(db, req.project_id, user["id"])
 
     personas_res = db.table("personas").select("*").eq("project_id", req.project_id).execute()
     if not personas_res.data:
@@ -39,9 +38,11 @@ async def run_journey(req: PhaseRequest):
             .execute()
         )
         # Find the journey step in agent_runs
+        persona_ids = {p["id"] for p in personas}
         for row in (cached.data or []):
             rich = row.get("output_json", {}).get("journeys_rich")
-            if rich:
+            rich_persona_ids = {jm.get("persona_id") for jm in rich or [] if jm.get("persona_id")}
+            if rich and rich_persona_ids & persona_ids:
                 return {"journeys_rich": rich, "cached": True}
 
     run = db.table("agent_runs").insert({
@@ -117,13 +118,12 @@ Rules:
 - Base everything on the PRD and personas — do not invent unrelated scenarios
 """
 
+        persona_name_to_id = {p["name"]: p["id"] for p in personas}
         result = await chat_json(system, user)
-        maps_data = result.get("journey_maps", [])
+        maps_data = normalize_journeys(result, set(persona_name_to_id.keys()))
 
         if not maps_data:
             raise ValueError("OpenAI returned no journey maps")
-
-        persona_name_to_id = {p["name"]: p["id"] for p in personas}
 
         # ── Delete old journey maps ───────────────────────────────────────────
         db.table("journey_maps").delete().eq("project_id", req.project_id).execute()
@@ -184,7 +184,7 @@ Rules:
 
 
 @router.post("/save")
-async def save_journeys(req: dict):
+async def save_journeys(req: dict, user=Depends(get_current_user)):
     """Persist designer edits to journey maps back to Supabase."""
     db = get_supabase()
     project_id = req.get("project_id")
@@ -193,13 +193,15 @@ async def save_journeys(req: dict):
     if not project_id or not journeys_rich:
         raise HTTPException(400, "project_id and journeys_rich required")
 
+    get_project_for_user(db, project_id, user["id"])
+
     for jm in journeys_rich:
         db_id = jm.get("db_id")
         if not db_id:
             continue
         db.table("journey_maps").update({
             "stages": jm.get("stages", []),
-        }).eq("id", db_id).execute()
+        }).eq("id", db_id).eq("project_id", project_id).execute()
 
     # Update cached agent_run
     cached = (

@@ -331,8 +331,8 @@ export default function UXAuditTool() {
       const res = await runAudit(proj.id, files, isValidLink ? linkValue : "", projectDesc);
       setAuditData(res.audit_rich as RichScreenAudit[]);
       setPhase("results");
-    } catch (err: any) {
-      setApiError(err?.message ?? "Audit failed. Make sure backend is running on http://localhost:8000");
+    } catch (err: unknown) {
+      setApiError(err instanceof Error ? err.message : "Audit failed. Make sure backend is running on http://localhost:8000");
       setPhase("setup");
     }
   };

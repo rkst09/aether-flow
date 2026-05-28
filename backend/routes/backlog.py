@@ -1,8 +1,10 @@
 import uuid as uuid_lib
-from fastapi import APIRouter, HTTPException
+from fastapi import APIRouter, Depends, HTTPException
 from pydantic import BaseModel
+from auth import get_current_user, get_project_for_user
 from database import get_supabase
 from services.openai_client import chat_json
+from services.pipeline_normalizers import normalize_backlog_modules
 from services.prd_extractor import fetch_prd_text
 
 router = APIRouter()
@@ -14,13 +16,10 @@ class PhaseRequest(BaseModel):
 
 
 @router.post("")
-async def run_backlog(req: PhaseRequest):
+async def run_backlog(req: PhaseRequest, user=Depends(get_current_user)):
     db = get_supabase()
 
-    res = db.table("projects").select("*").eq("id", req.project_id).single().execute()
-    if not res.data:
-        raise HTTPException(404, "Project not found")
-    project = res.data
+    project = get_project_for_user(db, req.project_id, user["id"])
 
     personas = db.table("personas").select("*").eq("project_id", req.project_id).execute().data or []
     journeys = db.table("journey_maps").select("*").eq("project_id", req.project_id).execute().data or []
@@ -126,13 +125,12 @@ Rules:
 - Do NOT invent features unrelated to the PRD
 """
 
+        persona_name_to_id = {p["name"]: p["id"] for p in personas}
         result = await chat_json(system, user)
-        modules_data = result.get("modules", [])
+        modules_data = normalize_backlog_modules(result, set(persona_name_to_id.keys()))
 
         if not modules_data:
             raise ValueError("OpenAI returned no backlog modules")
-
-        persona_name_to_id = {p["name"]: p["id"] for p in personas}
 
         # ── Delete old backlog items ───────────────────────────────────────────
         db.table("backlog_items").delete().eq("project_id", req.project_id).execute()

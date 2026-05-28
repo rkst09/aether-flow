@@ -27,7 +27,7 @@ function GitHubIcon() {
 
 export default function Login() {
   const navigate = useNavigate();
-  const { user, signIn, signInWithGoogle, signInWithGitHub } = useAuth();
+  const { user, signIn, signInWithGoogle, signInWithGitHub, resetPassword } = useAuth();
 
   const [email,        setEmail]        = useState("");
   const [password,     setPassword]     = useState("");
@@ -36,10 +36,15 @@ export default function Login() {
   const [submitting,   setSubmitting]   = useState(false);
   const [authError,    setAuthError]    = useState("");
   const [oauthLoading, setOauthLoading] = useState<"google" | "github" | null>(null);
+  const [forgotView,   setForgotView]   = useState(false);
+  const [resetEmail,   setResetEmail]   = useState("");
+  const [resetSent,    setResetSent]    = useState(false);
+  const [resetLoading, setResetLoading] = useState(false);
+  const [resetError,   setResetError]   = useState("");
 
   useEffect(() => {
     if (user) navigate("/dashboard", { replace: true });
-  }, [user]);
+  }, [navigate, user]);
 
   const emailError    = touched.email && (!email.trim() || !/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email))
     ? (!email.trim() ? "Email is required" : "Enter a valid email address") : "";
@@ -77,6 +82,20 @@ export default function Login() {
     setOauthLoading("github");
     const { error } = await signInWithGitHub();
     if (error) { setAuthError(error.message); setOauthLoading(null); }
+  }
+
+  async function handleResetPassword(e: React.FormEvent) {
+    e.preventDefault();
+    if (!resetEmail.trim()) return;
+    setResetLoading(true);
+    setResetError("");
+    const { error } = await resetPassword(resetEmail.trim());
+    setResetLoading(false);
+    if (error) {
+      setResetError(error.message);
+    } else {
+      setResetSent(true);
+    }
   }
 
   return (
@@ -155,7 +174,7 @@ export default function Login() {
           <div className="space-y-1.5">
             <div className="flex items-center justify-between">
               <label className="block text-[13px] font-medium text-slate-700">Password</label>
-              <button type="button" className="text-[12px] text-indigo-600 hover:text-indigo-700 transition-colors">
+              <button type="button" onClick={() => { setForgotView(true); setAuthError(""); setResetError(""); setResetSent(false); setResetEmail(email); }} className="text-[12px] text-indigo-600 hover:text-indigo-700 transition-colors">
                 Forgot password?
               </button>
             </div>
@@ -210,6 +229,67 @@ export default function Login() {
           </Link>
         </p>
       </motion.div>
+
+      {/* Forgot password modal */}
+      {forgotView && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/30 px-4" onClick={() => setForgotView(false)}>
+          <motion.div
+            initial={{ opacity: 0, scale: 0.96 }}
+            animate={{ opacity: 1, scale: 1 }}
+            transition={{ duration: 0.2 }}
+            className="w-full max-w-[380px] bg-white rounded-2xl border border-zinc-200 shadow-xl p-8 space-y-5"
+            onClick={e => e.stopPropagation()}
+          >
+            {resetSent ? (
+              <div className="space-y-4 text-center">
+                <div className="mx-auto w-12 h-12 rounded-full bg-indigo-50 flex items-center justify-center">
+                  <svg className="w-6 h-6 text-indigo-600" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={1.75}>
+                    <path strokeLinecap="round" strokeLinejoin="round" d="M3 8l7.89 5.26a2 2 0 002.22 0L21 8M5 19h14a2 2 0 002-2V7a2 2 0 00-2-2H5a2 2 0 00-2 2v10a2 2 0 002 2z" />
+                  </svg>
+                </div>
+                <div>
+                  <h2 className="text-[17px] font-semibold text-slate-900">Check your inbox</h2>
+                  <p className="text-[13px] text-slate-500 mt-1">We sent a password reset link to <span className="font-medium text-slate-700">{resetEmail}</span></p>
+                </div>
+                <button onClick={() => setForgotView(false)} className="w-full py-2.5 rounded-xl bg-[#6366F1] hover:bg-[#4F46E5] text-sm font-medium text-white transition-colors">
+                  Back to sign in
+                </button>
+              </div>
+            ) : (
+              <>
+                <div className="space-y-1">
+                  <h2 className="text-[17px] font-semibold text-slate-900">Reset your password</h2>
+                  <p className="text-[13px] text-slate-500">Enter your email and we'll send you a reset link.</p>
+                </div>
+                <form onSubmit={handleResetPassword} className="space-y-4">
+                  {resetError && (
+                    <div className="text-[12px] text-rose-600 bg-rose-50 border border-rose-100 rounded-xl px-3.5 py-2.5">{resetError}</div>
+                  )}
+                  <div className="space-y-1.5">
+                    <label className="block text-[13px] font-medium text-slate-700">Email</label>
+                    <input
+                      type="email"
+                      value={resetEmail}
+                      onChange={e => setResetEmail(e.target.value)}
+                      placeholder="you@company.com"
+                      required
+                      className="w-full rounded-xl border border-zinc-200 bg-white px-3.5 py-2.5 text-sm text-slate-900 placeholder:text-slate-400 focus:outline-none focus:ring-2 focus:ring-indigo-500/20 focus:border-indigo-400 transition-all"
+                    />
+                  </div>
+                  <div className="flex gap-2.5">
+                    <button type="button" onClick={() => setForgotView(false)} className="flex-1 py-2.5 rounded-xl border border-zinc-200 text-sm font-medium text-slate-600 hover:bg-zinc-50 transition-colors">
+                      Cancel
+                    </button>
+                    <button type="submit" disabled={resetLoading} className="flex-1 py-2.5 rounded-xl bg-[#6366F1] hover:bg-[#4F46E5] text-sm font-medium text-white transition-colors disabled:opacity-60">
+                      {resetLoading ? "Sending…" : "Send reset link"}
+                    </button>
+                  </div>
+                </form>
+              </>
+            )}
+          </motion.div>
+        </div>
+      )}
     </div>
   );
 }

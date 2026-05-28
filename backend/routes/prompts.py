@@ -1,8 +1,10 @@
 import uuid as uuid_lib
-from fastapi import APIRouter, HTTPException
+from fastapi import APIRouter, Depends, HTTPException
 from pydantic import BaseModel
+from auth import get_current_user, get_project_for_user
 from database import get_supabase
 from services.openai_client import chat_json
+from services.pipeline_normalizers import normalize_persona_prompts, normalize_system_prompt
 
 router = APIRouter()
 
@@ -13,13 +15,10 @@ class PhaseRequest(BaseModel):
 
 
 @router.post("")
-async def run_prompts(req: PhaseRequest):
+async def run_prompts(req: PhaseRequest, user=Depends(get_current_user)):
     db = get_supabase()
 
-    res = db.table("projects").select("*").eq("id", req.project_id).single().execute()
-    if not res.data:
-        raise HTTPException(404, "Project not found")
-    project = res.data
+    project = get_project_for_user(db, req.project_id, user["id"])
 
     personas = db.table("personas").select("*").eq("project_id", req.project_id).execute().data or []
 
@@ -157,7 +156,7 @@ Rules:
 """
 
         result = await chat_json(system, user)
-        prompts_data = result.get("persona_prompts", [])
+        prompts_data = normalize_persona_prompts(result, personas, {name: len(items) for name, items in persona_screens.items()})
 
         if not prompts_data:
             raise ValueError("OpenAI returned no persona prompts")
@@ -320,33 +319,12 @@ MANDATORY RULES:
 """
 
         synthesis_result = await chat_json(synthesis_system, synthesis_user)
-        system_prompt_raw = synthesis_result.get("system_prompt", {})
-
-        system_prompt = {
-            "quality": max(0, min(100, int(system_prompt_raw.get("quality", 80)))),
-            "totalScreens": int(system_prompt_raw.get("totalScreens", len(all_screens))),
-            "platform": system_prompt_raw.get("platform", platform),
-            "sections": [
-                {
-                    "id": s.get("id", f"s{i}"),
-                    "title": s.get("title", "Section"),
-                    "content": s.get("content", ""),
-                }
-                for i, s in enumerate(system_prompt_raw.get("sections", []))
-            ],
-            "personaInfluences": [
-                {
-                    "name": pi.get("name", ""),
-                    "role": pi.get("role", ""),
-                    "tag": pi.get("tag", "Primary"),
-                    "initial": pi.get("initial", ""),
-                    "keyGoal": pi.get("keyGoal", ""),
-                    "behaviorTag": pi.get("behaviorTag", "Operator"),
-                    "contributions": pi.get("contributions", []),
-                }
-                for pi in system_prompt_raw.get("personaInfluences", [])
-            ],
-        }
+        system_prompt = normalize_system_prompt(
+            synthesis_result.get("system_prompt", {}),
+            prompts_rich,
+            len(all_screens),
+            platform,
+        )
 
         db.table("projects").update({"current_phase": 4}).eq("id", req.project_id).execute()
 

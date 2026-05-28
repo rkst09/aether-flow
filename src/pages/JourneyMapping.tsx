@@ -1,9 +1,12 @@
 import { useState, useEffect, useCallback } from "react";
 import { useNavigate, useParams } from "react-router-dom";
 import { runPersonas, runJourney, saveJourneys, type RichPersona, type RichJourneyMap } from "@/lib/api";
+import { useApiCall } from "@/hooks/useApiCall";
 import { SidebarProvider, SidebarTrigger } from "@/components/ui/sidebar";
 import { AppSidebar } from "@/components/dashboard/AppSidebar";
+import { PhaseErrorState } from "@/components/PhaseErrorState";
 import { motion, AnimatePresence } from "framer-motion";
+import { getPhaseErrorDetails } from "@/lib/request-errors";
 import { cn } from "@/lib/utils";
 import { Button } from "@/components/ui/button";
 import {
@@ -77,6 +80,8 @@ interface JourneyStage {
   opportunities: Opportunity[];
 }
 
+type JourneyExportFormat = "word" | "excel" | "pdf";
+
 // ─── Emotion Config ─────────────────────────────────────────────────────────────
 
 const EMOTION_CONFIG: Record<number, { label: string; icon: React.ElementType; color: string; bg: string; dotFill: string }> = {
@@ -88,6 +93,145 @@ const EMOTION_CONFIG: Record<number, { label: string; icon: React.ElementType; c
 };
 
 // ─── Persona selector item (derived from RichPersona) ──────────────────────────
+
+function downloadBlob(content: BlobPart, filename: string, type: string) {
+  const blob = new Blob([content], { type });
+  const url = URL.createObjectURL(blob);
+  const anchor = document.createElement("a");
+  anchor.href = url;
+  anchor.download = filename;
+  document.body.appendChild(anchor);
+  anchor.click();
+  document.body.removeChild(anchor);
+  URL.revokeObjectURL(url);
+}
+
+function escapeHtml(value: string) {
+  return String(value ?? "")
+    .replace(/&/g, "&amp;")
+    .replace(/</g, "&lt;")
+    .replace(/>/g, "&gt;")
+    .replace(/"/g, "&quot;")
+    .replace(/'/g, "&#39;");
+}
+
+function getSafeFileName(value: string) {
+  return String(value || "Journey_Map")
+    .trim()
+    .replace(/[<>:"/\\|?*]+/g, "")
+    .replace(/\s+/g, "_")
+    .slice(0, 80) || "Journey_Map";
+}
+
+function getJourneyExportBaseName(projectName: string, personaName?: string) {
+  return getSafeFileName(`${projectName || "Aether"}_${personaName || "Journey"}_Journey_Map`);
+}
+
+function buildJourneyExportHtml(stages: JourneyStage[], projectName: string, personaName?: string) {
+  const today = new Date().toLocaleDateString("en-GB", { day: "2-digit", month: "long", year: "numeric" });
+  const avgEmotion = stages.length
+    ? (stages.reduce((sum, stage) => sum + stage.emotionScore, 0) / stages.length).toFixed(1)
+    : "0.0";
+
+  const list = (items: string[]) =>
+    items.length
+      ? `<ul>${items.map(item => `<li>${escapeHtml(item)}</li>`).join("")}</ul>`
+      : `<p class="muted">No items captured</p>`;
+
+  const opportunityList = (items: Opportunity[]) =>
+    items.length
+      ? `<ul>${items.map(item => `<li>${escapeHtml(item.text)} <span>Impact: ${escapeHtml(item.impact)} | Effort: ${escapeHtml(item.effort)}</span></li>`).join("")}</ul>`
+      : `<p class="muted">No opportunities captured</p>`;
+
+  const stageRows = stages.map((stage, index) => `
+    <section class="stage">
+      <h2>${index + 1}. ${escapeHtml(stage.title)}</h2>
+      <p class="emotion">Emotion: ${stage.emotionScore}/5 (${escapeHtml(EMOTION_CONFIG[stage.emotionScore]?.label ?? "Neutral")})</p>
+      <div class="grid">
+        <div><h3>User Actions</h3>${list(stage.actions)}</div>
+        <div><h3>Thoughts</h3>${list(stage.thoughts)}</div>
+        <div><h3>Pain Points</h3>${list(stage.painPoints)}</div>
+        <div><h3>System Gaps</h3>${list(stage.systemGaps)}</div>
+      </div>
+      <h3>Opportunities</h3>
+      ${opportunityList(stage.opportunities)}
+    </section>
+  `).join("");
+
+  return `<!DOCTYPE html>
+<html>
+  <head>
+    <meta charset="utf-8" />
+    <title>Aether Journey Map Export</title>
+    <style>
+      body{font-family:Segoe UI,Arial,sans-serif;color:#0f172a;padding:36px;font-size:13px;line-height:1.5}
+      h1{font-size:22px;margin:0 0 4px}
+      h2{font-size:16px;margin:0 0 6px}
+      h3{font-size:11px;text-transform:uppercase;letter-spacing:.08em;color:#64748b;margin:12px 0 6px}
+      ul{margin:0;padding-left:18px}
+      li{margin:3px 0}
+      li span{color:#64748b;font-size:12px}
+      .meta{color:#64748b;margin:0 0 24px}
+      .summary{display:flex;gap:18px;margin:18px 0 24px;padding:12px 14px;background:#f8fafc;border:1px solid #e5e7eb;border-radius:12px}
+      .stage{border:1px solid #e5e7eb;border-radius:14px;padding:18px;margin-bottom:16px;break-inside:avoid}
+      .emotion{color:#4f46e5;font-weight:600;margin:0 0 10px}
+      .grid{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:4px 24px}
+      .muted{color:#94a3b8;margin:0}
+      @media print{body{padding:20px}.stage{break-inside:avoid}.summary{display:block}}
+    </style>
+  </head>
+  <body>
+    <h1>${escapeHtml(projectName || "Aether")} - Journey Map</h1>
+    <p class="meta">${escapeHtml(personaName || "Selected persona")} | ${today}</p>
+    <div class="summary">
+      <div><strong>${stages.length}</strong> stages</div>
+      <div><strong>${avgEmotion}/5</strong> average emotion</div>
+      <div><strong>${stages.filter(stage => stage.emotionScore <= 2).length}</strong> high-friction stages</div>
+    </div>
+    ${stageRows || `<p class="muted">No journey stages available.</p>`}
+  </body>
+</html>`;
+}
+
+function exportJourneyToWord(stages: JourneyStage[], projectName: string, personaName?: string) {
+  downloadBlob(
+    buildJourneyExportHtml(stages, projectName, personaName),
+    `${getJourneyExportBaseName(projectName, personaName)}.doc`,
+    "application/msword"
+  );
+}
+
+function exportJourneyToExcel(stages: JourneyStage[], projectName: string, personaName?: string) {
+  const quote = (value: unknown) => `"${String(value ?? "").replace(/"/g, '""')}"`;
+  const rows = [
+    ["Project", "Persona", "Stage #", "Stage", "Emotion Score", "Emotion Label", "User Actions", "Thoughts", "Pain Points", "System Gaps", "Opportunities"],
+    ...stages.map((stage, index) => [
+      projectName,
+      personaName ?? "Selected persona",
+      index + 1,
+      stage.title,
+      stage.emotionScore,
+      EMOTION_CONFIG[stage.emotionScore]?.label ?? "Neutral",
+      stage.actions.join(" | "),
+      stage.thoughts.join(" | "),
+      stage.painPoints.join(" | "),
+      stage.systemGaps.join(" | "),
+      stage.opportunities.map(item => `${item.text} (Impact: ${item.impact}, Effort: ${item.effort})`).join(" | "),
+    ]),
+  ];
+
+  const csv = `\uFEFF${rows.map(row => row.map(quote).join(",")).join("\r\n")}`;
+  downloadBlob(csv, `${getJourneyExportBaseName(projectName, personaName)}.csv`, "text/csv;charset=utf-8;");
+}
+
+function exportJourneyToPdf(stages: JourneyStage[], projectName: string, personaName?: string) {
+  const printWindow = window.open("", "_blank", "noopener,noreferrer");
+  if (!printWindow) return;
+  printWindow.document.write(buildJourneyExportHtml(stages, projectName, personaName));
+  printWindow.document.close();
+  printWindow.focus();
+  printWindow.print();
+}
 
 const AVATAR_COLORS = [
   "gradient-accent text-white",
@@ -299,7 +443,7 @@ const EFFORT_STYLE: Record<EffortLevel, string> = {
 
 function CycleBadge({ value, styles, cycle, onChange, prefix }: {
   value: string; styles: Record<string, string>; cycle: string[];
-  onChange: (v: any) => void; prefix: string;
+  onChange: (v: string) => void; prefix: string;
 }) {
   return (
     <button
@@ -348,7 +492,23 @@ function EmotionSelector({ score, onChange }: { score: number; onChange: (s: num
 
 // ─── Emotion Graph ──────────────────────────────────────────────────────────────
 
-function EmotionTooltip({ active, payload }: any) {
+interface EmotionChartPayload {
+  name: string;
+  score: number;
+}
+
+interface EmotionTooltipProps {
+  active?: boolean;
+  payload?: Array<{ payload: EmotionChartPayload }>;
+}
+
+interface EmotionDotProps {
+  cx?: number;
+  cy?: number;
+  payload: EmotionChartPayload;
+}
+
+function EmotionTooltip({ active, payload }: EmotionTooltipProps) {
   if (!active || !payload?.length) return null;
   const { name, score } = payload[0]?.payload ?? {};
   const cfg = EMOTION_CONFIG[score] ?? EMOTION_CONFIG[3];
@@ -363,14 +523,14 @@ function EmotionTooltip({ active, payload }: any) {
 function EmotionGraph({ stages }: { stages: JourneyStage[] }) {
   const data = stages.map(s => ({ name: s.title, score: s.emotionScore }));
 
-  const renderDot = (props: any) => {
+  const renderDot = (props: EmotionDotProps) => {
     const { cx, cy, payload } = props;
     if (cx == null || cy == null) return null;
     const fill = EMOTION_CONFIG[payload.score]?.dotFill ?? "hsl(220 70% 55%)";
     return <circle key={`dot-${payload.name}`} cx={cx} cy={cy} r={4} fill={fill} stroke="white" strokeWidth={2} />;
   };
 
-  const renderActiveDot = (props: any) => {
+  const renderActiveDot = (props: EmotionDotProps) => {
     const { cx, cy, payload } = props;
     if (cx == null || cy == null) return null;
     const fill = EMOTION_CONFIG[payload.score]?.dotFill ?? "hsl(220 70% 55%)";
@@ -633,7 +793,7 @@ function AddStageCard({ onAdd }: { onAdd: () => void }) {
 
 // ─── Empty Journey State ────────────────────────────────────────────────────────
 
-function EmptyJourney({ onGenerate }: { onGenerate: () => void }) {
+function EmptyJourney({ onGenerate, onAdd }: { onGenerate: () => void; onAdd: () => void }) {
   return (
     <div className="flex flex-col items-center justify-center py-24 text-center px-8">
       <div className="h-12 w-12 rounded-2xl bg-secondary flex items-center justify-center mb-4">
@@ -648,7 +808,7 @@ function EmptyJourney({ onGenerate }: { onGenerate: () => void }) {
           <Lightbulb className="h-3.5 w-3.5" strokeWidth={1.5} />
           Generate from Persona
         </Button>
-        <Button variant="outline" onClick={onGenerate} className="h-9 rounded-xl border-border/60 text-sm gap-1.5">
+        <Button variant="outline" onClick={onAdd} className="h-9 rounded-xl border-border/60 text-sm gap-1.5">
           <Plus className="h-3.5 w-3.5" strokeWidth={2} />
           Add Manually
         </Button>
@@ -666,34 +826,28 @@ const JourneyMapping = () => {
   const [journeys, setJourneys] = useState<Record<string, JourneyStage[]>>({});
   const [personas, setPersonas] = useState<PersonaItem[]>([]);
   const [richJourneys, setRichJourneys] = useState<RichJourneyMap[]>([]);
-  const [generating, setGenerating] = useState(true);
-  const [apiError, setApiError] = useState<string | null>(null);
+  const { run: runApiCall, cancel: cancelApiCall, loading: apiLoading, error: apiError } =
+    useApiCall<[{ personas_rich: RichPersona[]; cached: boolean }, { journeys_rich: RichJourneyMap[]; cached: boolean }]>({ initialLoading: true });
 
   useEffect(() => {
     if (!projectId) return;
-    setGenerating(true);
-    setApiError(null);
-    Promise.all([runPersonas(projectId), runJourney(projectId)])
-      .then(([personasRes, journeyRes]) => {
+    runApiCall(signal => Promise.all([runPersonas(projectId, false, signal), runJourney(projectId, false, signal)]), {
+      onSuccess: ([personasRes, journeyRes]) => {
         const items = buildPersonaItems(personasRes.personas_rich);
         setPersonas(items);
         if (items.length > 0) setActivePersonaId(items[0].id);
         setRichJourneys(journeyRes.journeys_rich);
         setJourneys(buildJourneyState(journeyRes.journeys_rich));
-      })
-      .catch(err => setApiError(err?.message ?? "Failed to load journeys. Make sure backend is running on http://localhost:8000"))
-      .finally(() => setGenerating(false));
-  }, [projectId]);
+      },
+    });
+  }, [projectId, runApiCall]);
 
   const handleRegenerate = useCallback(() => {
     if (!projectId) return;
-    setGenerating(true);
-    setApiError(null);
-    runJourney(projectId, true)
-      .then(res => { setRichJourneys(res.journeys_rich); setJourneys(buildJourneyState(res.journeys_rich)); })
-      .catch(err => setApiError(err?.message ?? "Regeneration failed"))
-      .finally(() => setGenerating(false));
-  }, [projectId]);
+    runApiCall(signal => runJourney(projectId, true, signal), {
+      onSuccess: res => { setRichJourneys(res.journeys_rich); setJourneys(buildJourneyState(res.journeys_rich)); },
+    });
+  }, [projectId, runApiCall]);
 
   const handleProceed = useCallback(async () => {
     if (!projectId) return;
@@ -750,6 +904,22 @@ const JourneyMapping = () => {
 
   const commitProjectName = () => { setProjectName(nameDraft.trim() || projectName); setEditingName(false); };
 
+  const handleExport = (format: JourneyExportFormat) => {
+    if (stages.length === 0) return;
+
+    if (format === "word") {
+      exportJourneyToWord(stages, projectName, activePersona?.name);
+      return;
+    }
+
+    if (format === "excel") {
+      exportJourneyToExcel(stages, projectName, activePersona?.name);
+      return;
+    }
+
+    exportJourneyToPdf(stages, projectName, activePersona?.name);
+  };
+
   const CANVAS_MIN_W = stages.length * (CARD_W + 12) + 180;
   const overallScore = stages.length
     ? (stages.reduce((sum, s) => sum + s.emotionScore, 0) / stages.length).toFixed(1)
@@ -757,7 +927,7 @@ const JourneyMapping = () => {
 
   const highFrictionCount = stages.filter(s => s.emotionScore <= 2).length;
 
-  if (generating) return (
+  if (apiLoading) return (
     <SidebarProvider>
       <div className="min-h-screen flex w-full bg-background">
         <AppSidebar />
@@ -772,6 +942,9 @@ const JourneyMapping = () => {
           <div className="flex gap-1 mt-2">
             {[0,1,2].map(i => <div key={i} className="h-1.5 w-1.5 rounded-full bg-accent/40 animate-bounce" style={{ animationDelay: `${i * 0.15}s` }} />)}
           </div>
+          <Button variant="ghost" size="sm" className="text-xs text-muted-foreground mt-1" onClick={cancelApiCall}>
+            Cancel
+          </Button>
         </div>
       </div>
     </SidebarProvider>
@@ -781,18 +954,7 @@ const JourneyMapping = () => {
     <SidebarProvider>
       <div className="min-h-screen flex w-full bg-background">
         <AppSidebar />
-        <div className="flex-1 flex flex-col items-center justify-center gap-4 max-w-md mx-auto text-center px-6">
-          <div className="h-10 w-10 rounded-xl bg-destructive/10 flex items-center justify-center">
-            <AlertTriangle className="h-3.5 w-3.5 text-destructive" strokeWidth={1.5} />
-          </div>
-          <div>
-            <p className="text-sm font-medium text-foreground">Journey generation failed</p>
-            <p className="text-xs text-muted-foreground mt-1 leading-relaxed">{apiError}</p>
-          </div>
-          <Button size="sm" className="rounded-xl gradient-accent text-accent-foreground text-xs gap-1.5" onClick={handleRegenerate}>
-            Retry
-          </Button>
-        </div>
+        <PhaseErrorState details={getPhaseErrorDetails("Journey generation", apiError)} onRetry={handleRegenerate} />
       </div>
     </SidebarProvider>
   );
@@ -840,19 +1002,25 @@ const JourneyMapping = () => {
 
               <DropdownMenu>
                 <DropdownMenuTrigger asChild>
-                  <Button variant="outline" className="h-8 rounded-lg text-xs gap-1.5 px-3 border-border/60 hidden sm:flex">
+                  <Button variant="outline" className="h-8 rounded-lg text-xs gap-1.5 px-3 border-border/60 hidden sm:flex" disabled={stages.length === 0}>
                     <Download className="h-3 w-3" strokeWidth={1.5} />
                     Export
                     <ChevronDown className="h-3 w-3 opacity-40" strokeWidth={1.5} />
                   </Button>
                 </DropdownMenuTrigger>
                 <DropdownMenuContent align="end" className="rounded-xl min-w-[160px]">
-                  {["Word (.docx)", "Excel (.xlsx)", "PDF"].map(f => (
-                    <DropdownMenuItem key={f} className="text-sm gap-2.5 cursor-pointer">
-                      <FileText className="h-3.5 w-3.5 text-muted-foreground" strokeWidth={1.5} />
-                      {f}
-                    </DropdownMenuItem>
-                  ))}
+                  <DropdownMenuItem onClick={() => handleExport("word")} className="text-sm gap-2.5 cursor-pointer">
+                    <FileText className="h-3.5 w-3.5 text-muted-foreground" strokeWidth={1.5} />
+                    Word (.doc)
+                  </DropdownMenuItem>
+                  <DropdownMenuItem onClick={() => handleExport("excel")} className="text-sm gap-2.5 cursor-pointer">
+                    <FileText className="h-3.5 w-3.5 text-muted-foreground" strokeWidth={1.5} />
+                    Excel (.csv)
+                  </DropdownMenuItem>
+                  <DropdownMenuItem onClick={() => handleExport("pdf")} className="text-sm gap-2.5 cursor-pointer">
+                    <FileText className="h-3.5 w-3.5 text-muted-foreground" strokeWidth={1.5} />
+                    PDF (.pdf)
+                  </DropdownMenuItem>
                 </DropdownMenuContent>
               </DropdownMenu>
 
@@ -922,7 +1090,7 @@ const JourneyMapping = () => {
           {/* ── Journey Canvas ── */}
           <div className="flex-1 overflow-hidden flex flex-col">
             {stages.length === 0 ? (
-              <EmptyJourney onGenerate={addStage} />
+              <EmptyJourney onGenerate={handleRegenerate} onAdd={addStage} />
             ) : (
               <div className="flex-1 overflow-x-auto overflow-y-auto px-6 py-5">
                 <div style={{ minWidth: CANVAS_MIN_W }}>

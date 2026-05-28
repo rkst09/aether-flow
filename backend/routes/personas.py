@@ -1,7 +1,9 @@
-from fastapi import APIRouter, HTTPException
+from fastapi import APIRouter, Depends, HTTPException
 from pydantic import BaseModel
+from auth import get_current_user, get_project_for_user
 from database import get_supabase
 from services.openai_client import chat_json
+from services.pipeline_normalizers import normalize_personas
 from services.prd_extractor import fetch_prd_text
 
 router = APIRouter()
@@ -13,14 +15,11 @@ class PhaseRequest(BaseModel):
 
 
 @router.post("")
-async def run_personas(req: PhaseRequest):
+async def run_personas(req: PhaseRequest, user=Depends(get_current_user)):
     db = get_supabase()
 
     # ── Fetch project ─────────────────────────────────────────────────────────
-    res = db.table("projects").select("*").eq("id", req.project_id).single().execute()
-    if not res.data:
-        raise HTTPException(404, "Project not found")
-    project = res.data
+    project = get_project_for_user(db, req.project_id, user["id"])
 
     # ── Return cached result if available ────────────────────────────────────
     if not req.re_run:
@@ -140,7 +139,7 @@ Grounding rules:
 """
 
         result = await chat_json(system, user)
-        raw_personas = result.get("personas", [])
+        raw_personas = normalize_personas(result)
 
         if not raw_personas:
             raise ValueError("OpenAI returned no personas")
@@ -179,7 +178,7 @@ Grounding rules:
 
 
 @router.post("/save")
-async def save_personas(req: dict):
+async def save_personas(req: dict, user=Depends(get_current_user)):
     """Persist designer edits back to Supabase after review."""
     db = get_supabase()
     project_id = req.get("project_id")
@@ -187,6 +186,8 @@ async def save_personas(req: dict):
 
     if not project_id or not personas_rich:
         raise HTTPException(400, "project_id and personas_rich required")
+
+    get_project_for_user(db, project_id, user["id"])
 
     for p in personas_rich:
         db_id = p.get("db_id")
@@ -198,7 +199,7 @@ async def save_personas(req: dict):
             "goals": p.get("goals", {}).get("primary", []),
             "pain_points": p.get("painPoints", {}).get("functional", []),
             "confidence_score": p.get("confidence", 75),
-        }).eq("id", db_id).execute()
+        }).eq("id", db_id).eq("project_id", project_id).execute()
 
     # Update cached agent_run with edited data
     cached_run = (

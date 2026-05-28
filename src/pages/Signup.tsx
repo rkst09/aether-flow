@@ -71,7 +71,7 @@ export default function Signup() {
 
   useEffect(() => {
     if (user) navigate("/dashboard", { replace: true });
-  }, [user]);
+  }, [navigate, user]);
 
   const emailError = touched.email && (!email.trim() || !/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email))
     ? (!email.trim() ? "Email is required" : "Enter a valid email address") : "";
