@@ -34,6 +34,17 @@ interface GeneratedOutput {
   status: "ready" | "pending";
 }
 
+interface ProjectInsights {
+  personas: number;
+  journeys: number;
+  backlogItems: number;
+  screens: number;
+  prompts: number;
+  audits: number;
+  copyReviews: number;
+  docs: number;
+}
+
 // ─── Helpers ──────────────────────────────────────────────────────────────────
 
 function relativeTime(iso: string) {
@@ -48,90 +59,106 @@ function relativeTime(iso: string) {
   return new Date(iso).toLocaleDateString("en-AU", { day: "numeric", month: "short" });
 }
 
-const OUTPUT_PHASES = [
-  { name: "Personas",          phase: 1 },
-  { name: "Journey Maps",      phase: 2 },
-  { name: "Design Backlog",    phase: 3 },
-  { name: "Screen List",       phase: 4 },
-  { name: "Prototype Prompts", phase: 5 },
-  { name: "Documentation",     phase: 8 },
-];
+const EMPTY_INSIGHTS: ProjectInsights = {
+  personas: 0,
+  journeys: 0,
+  backlogItems: 0,
+  screens: 0,
+  prompts: 0,
+  audits: 0,
+  copyReviews: 0,
+  docs: 0,
+};
 
-function buildOutputs(currentPhase: number): GeneratedOutput[] {
-  return OUTPUT_PHASES.map(o => ({
-    name:   o.name,
-    count:  null,
-    status: currentPhase > o.phase ? "ready" : "pending",
-  }));
+function buildOutputs(insights: ProjectInsights): GeneratedOutput[] {
+  return [
+    { name: "Personas", count: insights.personas, status: insights.personas > 0 ? "ready" : "pending" },
+    { name: "Journey Maps", count: insights.journeys, status: insights.journeys > 0 ? "ready" : "pending" },
+    { name: "Design Backlog", count: insights.backlogItems, status: insights.backlogItems > 0 ? "ready" : "pending" },
+    { name: "Screen List", count: insights.screens, status: insights.screens > 0 ? "ready" : "pending" },
+    { name: "Prototype Prompts", count: insights.prompts, status: insights.prompts > 0 ? "ready" : "pending" },
+    { name: "Documentation", count: insights.docs, status: insights.docs > 0 ? "ready" : "pending" },
+  ];
 }
 
-function buildWorkflowSteps(projectId: string): WorkflowStep[] {
-  return [
+function buildWorkflowSteps(projectId: string, insights: ProjectInsights, isComplete: boolean): WorkflowStep[] {
+  const definitions: Omit<WorkflowStep, "status">[] = [
     {
       number: "01",
       title: "Define user personas",
       description: "Extract and validate key user archetypes from your PRD",
-      status: "done",
-      meta: "3 personas confirmed",
+      meta: insights.personas > 0 ? `${insights.personas} personas confirmed` : null,
       route: `/project/${projectId}/phase/01`,
     },
     {
       number: "02",
       title: "Map emotional journeys",
       description: "Visualise how each persona moves through your product",
-      status: "done",
-      meta: "3 journey maps created",
+      meta: insights.journeys > 0 ? `${insights.journeys} journey maps created` : null,
       route: `/project/${projectId}/phase/01/journey`,
     },
     {
       number: "03",
       title: "Structure design tasks",
       description: "Build a prioritised backlog from personas and journeys",
-      status: "done",
-      meta: "18 tasks in backlog",
+      meta: insights.backlogItems > 0 ? `${insights.backlogItems} tasks in backlog` : null,
       route: `/project/${projectId}/phase/01/backlog`,
     },
     {
       number: "04",
       title: "Derive product screens",
       description: "Generate a structured screen inventory from the backlog",
-      status: "active",
-      meta: "12 screens need review",
+      meta: insights.screens > 0 ? `${insights.screens} screens derived` : null,
       route: `/project/${projectId}/phase/02`,
     },
     {
       number: "05",
       title: "Generate builder prompts",
       description: "Create Lovable-ready prompts for each confirmed screen",
-      status: "locked",
-      meta: null,
+      meta: insights.prompts > 0 ? `${insights.prompts} prompt sets generated` : null,
       route: `/project/${projectId}/phase/03`,
     },
     {
       number: "06",
       title: "Evaluate usability & friction",
       description: "Run a heuristic audit across screens and user flows",
-      status: "locked",
-      meta: null,
+      meta: insights.audits > 0 ? `${insights.audits} screens audited` : null,
       route: `/project/${projectId}/phase/04`,
     },
     {
       number: "07",
       title: "Refine microcopy & tone",
       description: "Review and improve all product copy across screens",
-      status: "locked",
-      meta: null,
+      meta: insights.copyReviews > 0 ? `${insights.copyReviews} screens reviewed` : null,
       route: `/project/${projectId}/phase/05`,
     },
     {
       number: "08",
       title: "Export BA handoff docs",
       description: "Generate structured documentation ready for your dev team",
-      status: "locked",
-      meta: null,
+      meta: insights.docs > 0 ? `${insights.docs} persona handoffs generated` : null,
       route: `/project/${projectId}/phase/06`,
     },
   ];
+
+  const completion = [
+    insights.personas > 0,
+    insights.journeys > 0,
+    insights.backlogItems > 0,
+    insights.screens > 0,
+    insights.prompts > 0,
+    insights.audits > 0,
+    insights.copyReviews > 0,
+    insights.docs > 0 || isComplete,
+  ];
+
+  const firstIncomplete = completion.findIndex(done => !done);
+  const activeIndex = firstIncomplete === -1 ? definitions.length - 1 : firstIncomplete;
+
+  return definitions.map((step, index) => ({
+    ...step,
+    status: completion[index] ? "done" : index === activeIndex ? "active" : "locked",
+  }));
 }
 
 // ─── Animation helper ─────────────────────────────────────────────────────────
@@ -260,14 +287,8 @@ function StepRow({
 
 // ─── Derive workflow steps from current_phase ────────────────────────────────
 
-function buildSteps(currentPhase: number, workflowSteps: WorkflowStep[]): WorkflowStep[] {
-  return workflowSteps.map((s, i) => {
-    const phase = i + 1;
-    const status: StepStatus =
-      phase < currentPhase  ? "done"   :
-      phase === currentPhase ? "active" : "locked";
-    return { ...s, status };
-  });
+function buildSteps(_currentPhase: number, workflowSteps: WorkflowStep[]): WorkflowStep[] {
+  return workflowSteps;
 }
 
 // ─── Page ─────────────────────────────────────────────────────────────────────
@@ -276,30 +297,85 @@ const ProjectDetail = () => {
   const navigate       = useNavigate();
   const { id }         = useParams<{ id: string }>();
   const [project, setProject] = useState<Project | null>(null);
+  const [insights, setInsights] = useState<ProjectInsights>(EMPTY_INSIGHTS);
   const [loading, setLoading] = useState(true);
   const [fetchError, setFetchError] = useState<string | null>(null);
 
   useEffect(() => {
     if (!id) return;
-    supabase
-      .from("projects")
-      .select("*")
-      .eq("id", id)
-      .single()
-      .then(({ data, error }) => {
-        if (error) {
-          setFetchError(error.message);
-        } else {
-          setProject(data);
-        }
+    let cancelled = false;
+
+    const load = async () => {
+      setLoading(true);
+      setFetchError(null);
+
+      const [
+        projectRes,
+        personasRes,
+        journeysRes,
+        backlogRes,
+        screensRes,
+        runsRes,
+      ] = await Promise.all([
+        supabase.from("projects").select("*").eq("id", id).single(),
+        supabase.from("personas").select("*", { count: "exact", head: true }).eq("project_id", id),
+        supabase.from("journey_maps").select("*", { count: "exact", head: true }).eq("project_id", id),
+        supabase.from("backlog_items").select("*", { count: "exact", head: true }).eq("project_id", id),
+        supabase.from("screens").select("*", { count: "exact", head: true }).eq("project_id", id),
+        supabase
+          .from("agent_runs")
+          .select("phase, output_json, created_at")
+          .eq("project_id", id)
+          .eq("status", "completed")
+          .in("phase", [3, 4, 5, 6])
+          .order("created_at", { ascending: false }),
+      ]);
+
+      if (cancelled) return;
+
+      if (projectRes.error) {
+        setFetchError(projectRes.error.message);
         setLoading(false);
+        return;
+      }
+
+      const latestByPhase = new Map<number, Record<string, unknown>>();
+      (runsRes.data ?? []).forEach((run) => {
+        if (!latestByPhase.has(run.phase)) {
+          latestByPhase.set(run.phase, (run.output_json as Record<string, unknown>) ?? {});
+        }
       });
+
+      const promptsOutput = latestByPhase.get(3) ?? {};
+      const auditOutput = latestByPhase.get(4) ?? {};
+      const copyOutput = latestByPhase.get(5) ?? {};
+      const docsOutput = latestByPhase.get(6) ?? {};
+
+      setProject(projectRes.data);
+      setInsights({
+        personas: personasRes.count ?? 0,
+        journeys: journeysRes.count ?? 0,
+        backlogItems: backlogRes.count ?? 0,
+        screens: screensRes.count ?? 0,
+        prompts: Number(promptsOutput.prompt_count ?? ((promptsOutput.prompts_rich as unknown[])?.length ?? 0)),
+        audits: Number(auditOutput.screen_count ?? ((auditOutput.audit_rich as unknown[])?.length ?? 0)),
+        copyReviews: Number(copyOutput.screen_count ?? ((copyOutput.copy_rich as unknown[])?.length ?? 0)),
+        docs: Number(docsOutput.persona_count ?? ((docsOutput.persona_docs as unknown[])?.length ?? 0)),
+      });
+      setLoading(false);
+    };
+
+    void load();
+
+    return () => {
+      cancelled = true;
+    };
   }, [id]);
 
-  const workflowSteps  = id ? buildWorkflowSteps(id) : [];
+  const workflowSteps  = id ? buildWorkflowSteps(id, insights, project?.status === "completed") : [];
   const steps          = buildSteps(project?.current_phase ?? 1, workflowSteps);
   const activeStep     = steps.find((s) => s.status === "active");
-  const generatedOutputs = buildOutputs(project?.current_phase ?? 1);
+  const generatedOutputs = buildOutputs(insights);
   const inputFiles     = project?.prd_filename
     ? [{ name: project.prd_filename, size: "—", uploaded: new Date(project.created_at).toLocaleDateString("en-AU", { day: "numeric", month: "short", year: "numeric" }) }]
     : [];

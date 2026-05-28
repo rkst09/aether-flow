@@ -1,10 +1,21 @@
 import { useState, useEffect } from "react";
 import { useNavigate, useParams } from "react-router-dom";
-import { runBacklog, type RichBacklogModule } from "@/lib/api";
+import { runBacklog, type RichBacklogModule, type RichJourneyMap, type RichPersona } from "@/lib/api";
+import { useApiCall } from "@/hooks/useApiCall";
+import { supabase } from "@/lib/supabase";
 import { SidebarProvider, SidebarTrigger } from "@/components/ui/sidebar";
 import { AppSidebar } from "@/components/dashboard/AppSidebar";
+import { PhaseErrorState } from "@/components/PhaseErrorState";
 import { motion, AnimatePresence } from "framer-motion";
 import { cn } from "@/lib/utils";
+import { getPhaseErrorDetails } from "@/lib/request-errors";
+import {
+  deriveBacklogInsights,
+  type DerivedIANode,
+  type DerivedOpenQuestion,
+  type DerivedUserFlow,
+  type PersonaContextCard,
+} from "@/lib/pipeline-insights";
 import { Button } from "@/components/ui/button";
 import {
   DropdownMenu, DropdownMenuContent, DropdownMenuItem, DropdownMenuTrigger,
@@ -53,39 +64,16 @@ interface BacklogModule {
   items: BacklogItem[];
 }
 
-interface FlowStep {
-  label: string;
-  type: "entry" | "action" | "decision" | "outcome";
-}
-
-interface UserFlow {
-  id: string;
-  name: string;
-  persona: string;
-  steps: FlowStep[];
-}
-
-interface IANode {
-  id: string;
-  label: string;
-  tag?: string;
-  children?: IANode[];
-}
-
-interface OpenQuestion {
-  id: string;
-  question: string;
-  context: string;
-  priority: Priority;
-  resolved: boolean;
-}
+type UserFlow = DerivedUserFlow;
+type IANode = DerivedIANode;
+type OpenQuestion = DerivedOpenQuestion;
 
 // ─── Context personas (populated from API — empty until loaded) ──────────────────
-const CTX_PERSONAS: { id: string; name: string; initials: string; cls: string; painPoints: string[] }[] = [];
+let CTX_PERSONAS: PersonaContextCard[] = [];
 
 // ─── User Flows ─────────────────────────────────────────────────────────────────
 
-const USER_FLOWS: UserFlow[] = [
+let USER_FLOWS: UserFlow[] = [
   {
     id: "f1", name: "New User First-Project Flow", persona: "Sarah Chen",
     steps: [
@@ -128,7 +116,7 @@ const USER_FLOWS: UserFlow[] = [
 
 // ─── Information Architecture ───────────────────────────────────────────────────
 
-const IA_TREE: IANode[] = [
+let IA_TREE: IANode[] = [
   {
     id: "ia1", label: "Dashboard", tag: "Home",
     children: [
@@ -207,6 +195,10 @@ const INITIAL_QUESTIONS: OpenQuestion[] = [
 ];
 
 // ─── Stage Tracker ─────────────────────────────────────────────────────────────
+
+let JOURNEY_COUNT = 4;
+let OPPORTUNITY_COUNT = 0;
+let PRD_CLARITY_SCORE = 69;
 
 const STAGES = [
   { short: "Upload" }, { short: "Intake" }, { short: "Screens" },
@@ -365,7 +357,7 @@ const I_STYLE: Record<ImpactType, string> = {
 };
 
 function CycleBadge({ value, styles, cycle, onChange, prefix }: {
-  value: string; styles: Record<string, string>; cycle: string[]; onChange: (v: any) => void; prefix: string;
+  value: string; styles: Record<string, string>; cycle: string[]; onChange: (v: string) => void; prefix: string;
 }) {
   return (
     <button onClick={() => { const i = cycle.indexOf(value); onChange(cycle[(i + 1) % cycle.length]); }}
@@ -412,7 +404,15 @@ function ImpactChips({ values, onChange }: { values: ImpactType[]; onChange: (v:
 
 // ─── Context Summary ────────────────────────────────────────────────────────────
 
-function ContextSummary() {
+function ContextSummary({
+  personas,
+  journeyCount,
+  opportunityCount,
+}: {
+  personas: PersonaContextCard[];
+  journeyCount: number;
+  opportunityCount: number;
+}) {
   const [expanded, setExpanded] = useState(false);
 
   return (
@@ -426,17 +426,17 @@ function ContextSummary() {
             Derived from
           </p>
           <div className="flex items-center gap-1.5">
-            {CTX_PERSONAS.map(p => (
+            {personas.map(p => (
               <div key={p.id} className={cn("h-6 w-6 rounded-lg text-[9px] font-bold flex items-center justify-center", p.cls)} title={p.name}>
                 {p.initials}
               </div>
             ))}
           </div>
           <div className="flex items-center gap-1.5 text-[11px] text-muted-foreground">
-            <span className="font-medium text-foreground">{CTX_PERSONAS.length}</span> personas ·
-            <span className="font-medium text-foreground">4</span> journey maps ·
+            <span className="font-medium text-foreground">{personas.length}</span> personas ·
+            <span className="font-medium text-foreground">{journeyCount}</span> journey maps ·
             <span className="font-medium text-foreground">
-              0 opportunities
+              {opportunityCount} opportunities
             </span>
           </div>
         </div>
@@ -454,7 +454,7 @@ function ContextSummary() {
             className="overflow-hidden"
           >
             <div className="px-6 pb-4 grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-3">
-              {CTX_PERSONAS.map(p => (
+              {personas.map(p => (
                 <div key={p.id} className="surface-elevated rounded-xl p-3 space-y-2.5">
                   <div className="flex items-center gap-2">
                     <div className={cn("h-7 w-7 rounded-lg text-[10px] font-bold flex items-center justify-center shrink-0", p.cls)}>{p.initials}</div>
@@ -1055,43 +1055,67 @@ function OpenQuestionsSection({ questions, onChange }: {
 
 function exportBacklog(modules: BacklogModule[], questions: OpenQuestion[], projectName: string) {
   const q = (s: string) => `"${String(s ?? "").replace(/"/g, '""')}"`;
+  const today = new Date().toLocaleDateString("en-GB", { day: "2-digit", month: "long", year: "numeric" });
+  const totalItems = modules.reduce((n, m) => n + m.items.length, 0);
+  const COLS = 11;
+  const blank = () => Array(COLS).fill(q(""));
 
-  const rows: string[][] = [
-    [q("AETHER — DESIGN BACKLOG"), q(""), q(""), q(""), q(""), q(""), q(""), q(""), q(""), q(""), q("")],
-    [q(`Project: ${projectName}`), ...Array(10).fill(q(""))],
-    [q(`Generated: ${new Date().toLocaleDateString("en-GB", { day: "2-digit", month: "long", year: "numeric" })}`), ...Array(10).fill(q(""))],
-    [q(`Total Modules: ${modules.length}`), q(`Total Items: ${modules.reduce((n, m) => n + m.items.length, 0)}`), ...Array(9).fill(q(""))],
-    Array(11).fill(q("")),
-    [q("DESIGN BACKLOG"), ...Array(10).fill(q(""))],
-    [
-      q("Module"), q("Feature Name"), q("Problem Statement"), q("Persona(s)"),
-      q("Journey Stage"), q("Opportunity Direction"), q("Priority"), q("Effort"),
-      q("Impact"), q("Dependencies"), q("Edge Cases"),
-    ],
-  ];
+  const rows: string[][] = [];
 
-  modules.forEach(mod => {
+  // ── Title block ──
+  rows.push([q("AETHER — DESIGN BACKLOG"), ...Array(COLS - 1).fill(q(""))]);
+  rows.push([q(`Project: ${projectName}`), ...Array(COLS - 1).fill(q(""))]);
+  rows.push([q(`Date: ${today}`), ...Array(COLS - 1).fill(q(""))]);
+  rows.push([q(`Total Features: ${totalItems}   |   Groups: ${modules.length}`), ...Array(COLS - 1).fill(q(""))]);
+  rows.push(blank());
+
+  // ── Legend ──
+  rows.push([q("HOW TO READ THIS FILE"), ...Array(COLS - 1).fill(q(""))]);
+  rows.push([q("Priority  →  HIGH = Build this first, it is very important  |  MEDIUM = Build after HIGH items  |  LOW = Nice to have, build last"), ...Array(COLS - 1).fill(q(""))]);
+  rows.push([q("Build Time  →  HIGH = Weeks of work  |  MEDIUM = A few days  |  LOW = A few hours"), ...Array(COLS - 1).fill(q(""))]);
+  rows.push([q("Impact Area  →  Experience = Makes the app nicer to use  |  Conversion = Helps get more users  |  Performance = Makes the app faster  |  Retention = Keeps users coming back"), ...Array(COLS - 1).fill(q(""))]);
+  rows.push([q("Needs First  →  Other features that must be ready before this one can be built"), ...Array(COLS - 1).fill(q(""))]);
+  rows.push([q("Watch Out For  →  Unusual situations or problems that might happen when building or using this feature"), ...Array(COLS - 1).fill(q(""))]);
+  rows.push(blank());
+  rows.push(blank());
+
+  let num = 0;
+  modules.forEach((mod, i) => {
+    rows.push([q(`GROUP ${i + 1} OF ${modules.length}: ${mod.name.toUpperCase()}`), ...Array(COLS - 1).fill(q(""))]);
+    rows.push([q(`${mod.items.length} feature${mod.items.length !== 1 ? "s" : ""} in this group`), ...Array(COLS - 1).fill(q(""))]);
+    rows.push(blank());
+    rows.push([
+      q("#"), q("Feature Name"), q("Problem to Solve"),
+      q("Who Uses It"), q("When in the Journey"), q("What We Will Build"),
+      q("Priority"), q("Build Time"), q("Impact Area"),
+      q("Needs First"), q("Watch Out For"),
+    ]);
     mod.items.forEach(item => {
+      num++;
       rows.push([
-        q(mod.name), q(item.featureName), q(item.problemStatement),
-        q(item.personaIds.join(" | ")), q(item.journeyStage), q(item.opportunityDirection),
+        q(String(num)), q(item.featureName), q(item.problemStatement),
+        q(item.personaIds.join(", ")), q(item.journeyStage), q(item.opportunityDirection),
         q(item.priority), q(item.effort), q(item.impact.join(", ")),
-        q(item.dependencies.join("; ")), q(item.edgeCases.join("; ")),
+        q(item.dependencies.join(", ")), q(item.edgeCases.join(", ")),
       ]);
     });
-    rows.push(Array(11).fill(q(""))); // spacer between modules
+    rows.push(blank());
+    rows.push(blank());
   });
 
-  rows.push(Array(11).fill(q("")));
-  rows.push([q("OPEN QUESTIONS"), ...Array(10).fill(q(""))]);
-  rows.push([q("Priority"), q("Question"), q("Context"), q("Status"), ...Array(7).fill(q(""))]);
-
-  questions.forEach(question => {
-    rows.push([
-      q(question.priority), q(question.question), q(question.context),
-      q(question.resolved ? "Resolved" : "Open"), ...Array(7).fill(q("")),
-    ]);
-  });
+  // ── Open questions ──
+  if (questions.length > 0) {
+    rows.push([q("OPEN QUESTIONS — Things we still need to figure out"), ...Array(COLS - 1).fill(q(""))]);
+    rows.push(blank());
+    rows.push([q("#"), q("Priority"), q("Question"), q("More Context"), q("Status"), ...Array(COLS - 5).fill(q(""))]);
+    questions.forEach((question, i) => {
+      rows.push([
+        q(String(i + 1)), q(question.priority), q(question.question),
+        q(question.context), q(question.resolved ? "Done — Resolved" : "Open — Needs Answer"),
+        ...Array(COLS - 5).fill(q("")),
+      ]);
+    });
+  }
 
   const csv = "\uFEFF" + rows.map(row => row.join(",")).join("\r\n");
   const blob = new Blob([csv], { type: "text/csv;charset=utf-8;" });
@@ -1160,19 +1184,57 @@ const DesignBacklog = () => {
   const navigate = useNavigate();
   const { id: projectId } = useParams<{ id: string }>();
   const [modules, setModules] = useState<BacklogModule[]>([]);
+  const [personasRich, setPersonasRich] = useState<RichPersona[]>([]);
+  const [journeysRich, setJourneysRich] = useState<RichJourneyMap[]>([]);
   const [questions, setQuestions] = useState<OpenQuestion[]>(INITIAL_QUESTIONS);
-  const [generating, setGenerating] = useState(true);
-  const [apiError, setApiError] = useState<string | null>(null);
+  const { run: runApiCall, cancel: cancelApiCall, loading: apiLoading, error: apiError } = useApiCall({ initialLoading: true });
 
   useEffect(() => {
     if (!projectId) return;
-    setGenerating(true);
-    setApiError(null);
-    runBacklog(projectId)
-      .then(res => setModules(mapApiToUiModules(res.backlog_rich)))
-      .catch(err => setApiError(err?.message ?? "Failed to load backlog. Make sure backend is running on http://localhost:8000"))
-      .finally(() => setGenerating(false));
-  }, [projectId]);
+    runApiCall(signal => Promise.all([
+      runBacklog(projectId, false, signal),
+      supabase.from("projects").select("name").eq("id", projectId).single(),
+      supabase
+        .from("agent_runs")
+        .select("output_json, created_at")
+        .eq("project_id", projectId)
+        .eq("phase", 1)
+        .eq("status", "completed")
+        .order("created_at", { ascending: false }),
+    ]), {
+      onSuccess: ([backlogRes, projectRes, phaseOneRes]) => {
+        const uiModules = mapApiToUiModules(backlogRes.backlog_rich);
+        const phaseOneRuns = phaseOneRes.data ?? [];
+        let nextPersonas: RichPersona[] = [];
+        let nextJourneys: RichJourneyMap[] = [];
+
+        phaseOneRuns.forEach((row) => {
+          const output = (row.output_json ?? {}) as Record<string, unknown>;
+          if (nextPersonas.length === 0 && Array.isArray(output.personas_rich)) {
+            nextPersonas = output.personas_rich as RichPersona[];
+          }
+          if (nextJourneys.length === 0 && Array.isArray(output.journeys_rich)) {
+            nextJourneys = output.journeys_rich as RichJourneyMap[];
+          }
+        });
+
+        const derived = deriveBacklogInsights(
+          uiModules as BacklogModuleInsight[],
+          nextPersonas,
+          nextJourneys,
+        );
+
+        setModules(uiModules);
+        setPersonasRich(nextPersonas);
+        setJourneysRich(nextJourneys);
+        setQuestions(derived.questions.length > 0 ? derived.questions : INITIAL_QUESTIONS);
+        if (projectRes.data?.name) {
+          setProjectName(projectRes.data.name);
+          setNameDraft(projectRes.data.name);
+        }
+      },
+    });
+  }, [projectId, runApiCall]);
   const [activeSection, setActiveSection] = useState<SectionKey>("backlog");
   const [projectName, setProjectName] = useState("Aether Project");
   const [editingName, setEditingName] = useState(false);
@@ -1180,11 +1242,23 @@ const DesignBacklog = () => {
 
   const commitName = () => { setProjectName(nameDraft.trim() || projectName); setEditingName(false); };
 
+  const derivedInsights = deriveBacklogInsights(
+    modules as BacklogModuleInsight[],
+    personasRich,
+    journeysRich,
+  );
+  CTX_PERSONAS = derivedInsights.personas;
+  USER_FLOWS = derivedInsights.flows;
+  IA_TREE = derivedInsights.iaTree;
+  JOURNEY_COUNT = journeysRich.length || USER_FLOWS.length;
+  OPPORTUNITY_COUNT = derivedInsights.opportunityCount;
+  PRD_CLARITY_SCORE = derivedInsights.clarityScore;
+
   const totalItems = modules.reduce((n, m) => n + m.items.length, 0);
   const highItems  = modules.reduce((n, m) => n + m.items.filter(i => i.priority === "High").length, 0);
   const unresolvedQ = questions.filter(q => !q.resolved).length;
 
-  if (generating) return (
+  if (apiLoading) return (
     <SidebarProvider>
       <div className="min-h-screen flex w-full bg-background">
         <AppSidebar />
@@ -1199,6 +1273,9 @@ const DesignBacklog = () => {
           <div className="flex gap-1 mt-2">
             {[0,1,2].map(i => <div key={i} className="h-1.5 w-1.5 rounded-full bg-accent/40 animate-bounce" style={{ animationDelay: `${i * 0.15}s` }} />)}
           </div>
+          <Button variant="ghost" size="sm" className="text-xs text-muted-foreground mt-1" onClick={cancelApiCall}>
+            Cancel
+          </Button>
         </div>
       </div>
     </SidebarProvider>
@@ -1208,20 +1285,10 @@ const DesignBacklog = () => {
     <SidebarProvider>
       <div className="min-h-screen flex w-full bg-background">
         <AppSidebar />
-        <div className="flex-1 flex flex-col items-center justify-center gap-4 max-w-md mx-auto text-center px-6">
-          <div className="h-10 w-10 rounded-xl bg-destructive/10 flex items-center justify-center">
-            <AlertTriangle className="h-5 w-5 text-destructive" strokeWidth={1.5} />
-          </div>
-          <div>
-            <p className="text-sm font-medium text-foreground">Backlog generation failed</p>
-            <p className="text-xs text-muted-foreground mt-1 leading-relaxed">{apiError}</p>
-          </div>
-          <Button size="sm" className="rounded-xl gradient-accent text-accent-foreground text-xs gap-1.5"
-            onClick={() => { setGenerating(true); setApiError(null); runBacklog(projectId!, true).then(res => setModules(mapApiToUiModules(res.backlog_rich))).catch(err => setApiError(err?.message ?? "Retry failed")).finally(() => setGenerating(false)); }}>
-            <RefreshCw className="h-3.5 w-3.5" strokeWidth={1.5} />
-            Retry
-          </Button>
-        </div>
+        <PhaseErrorState
+          details={getPhaseErrorDetails("Backlog generation", apiError)}
+          onRetry={() => runApiCall(signal => runBacklog(projectId!, true, signal), { onSuccess: res => setModules(mapApiToUiModules(res.backlog_rich)) })}
+        />
       </div>
     </SidebarProvider>
   );
@@ -1257,7 +1324,7 @@ const DesignBacklog = () => {
 
             <div className="flex items-center gap-1.5 px-2.5 py-1 rounded-full bg-[hsl(var(--success-soft))] shrink-0 hidden lg:flex">
               <div className="h-1.5 w-1.5 rounded-full bg-[hsl(var(--success))]" />
-              <span className="text-[11px] font-semibold text-[hsl(var(--success))]">PRD Clarity 69%</span>
+              <span className="text-[11px] font-semibold text-[hsl(var(--success))]">PRD Clarity {PRD_CLARITY_SCORE}%</span>
             </div>
 
             <div className="ml-auto flex items-center gap-2">
@@ -1302,7 +1369,11 @@ const DesignBacklog = () => {
           </div>
 
           {/* ── Context Summary ── */}
-          <ContextSummary />
+          <ContextSummary
+            personas={derivedInsights.personas}
+            journeyCount={JOURNEY_COUNT}
+            opportunityCount={OPPORTUNITY_COUNT}
+          />
 
           {/* ── Section Tabs ── */}
           <div className="border-b border-border/60 px-6 shrink-0">

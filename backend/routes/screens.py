@@ -1,8 +1,10 @@
 import uuid as uuid_lib
-from fastapi import APIRouter, HTTPException
+from fastapi import APIRouter, Depends, HTTPException
 from pydantic import BaseModel
+from auth import get_current_user, get_project_for_user
 from database import get_supabase
 from services.openai_client import chat_json
+from services.pipeline_normalizers import normalize_screen_modules
 
 router = APIRouter()
 
@@ -13,13 +15,10 @@ class PhaseRequest(BaseModel):
 
 
 @router.post("")
-async def run_screens(req: PhaseRequest):
+async def run_screens(req: PhaseRequest, user=Depends(get_current_user)):
     db = get_supabase()
 
-    res = db.table("projects").select("*").eq("id", req.project_id).single().execute()
-    if not res.data:
-        raise HTTPException(404, "Project not found")
-    project = res.data
+    project = get_project_for_user(db, req.project_id, user["id"])
 
     personas = db.table("personas").select("*").eq("project_id", req.project_id).execute().data or []
 
@@ -140,7 +139,7 @@ Rules:
 """
 
         result = await chat_json(system, user)
-        modules_data = result.get("screen_modules", [])
+        modules_data = normalize_screen_modules(result, set(persona_id_map.keys()))
 
         if not modules_data:
             raise ValueError("OpenAI returned no screen modules")

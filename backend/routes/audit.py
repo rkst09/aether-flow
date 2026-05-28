@@ -8,8 +8,9 @@ import base64
 import io
 from typing import Optional, List
 
-from fastapi import APIRouter, HTTPException, UploadFile, File, Form
+from fastapi import APIRouter, Depends, HTTPException, UploadFile, File, Form
 
+from auth import get_current_user, get_project_for_user
 from database import get_supabase
 from services.openai_client import chat_vision, chat_json
 
@@ -247,6 +248,7 @@ async def run_audit(
     context: Optional[str] = Form(None),
     re_run: bool = Form(False),
     screens: List[UploadFile] = File(default=[]),
+    user=Depends(get_current_user),
 ):
     db = get_supabase()
 
@@ -255,13 +257,31 @@ async def run_audit(
     persona_names: list[str] = []
 
     if project_id:
-        res = db.table("projects").select("*").eq("id", project_id).single().execute()
-        if res.data:
-            project = res.data
+        project = get_project_for_user(db, project_id, user["id"])
+        if project:
             persona_rows = db.table("personas").select("name").eq("project_id", project_id).execute().data or []
             persona_names = [p["name"] for p in persona_rows]
 
     project_name = project["name"] if project else "UX Audit"
+
+    # ── Return cached result when available ────────────────────────────────────
+    if project_id and not re_run:
+        cached_run = (
+            db.table("agent_runs")
+            .select("output_json")
+            .eq("project_id", project_id)
+            .eq("phase", 4)
+            .eq("status", "completed")
+            .order("created_at", desc=True)
+            .limit(1)
+            .execute()
+        )
+        cached_audit = (cached_run.data or [{}])[0].get("output_json", {}).get("audit_rich")
+        if cached_audit:
+            has_files = bool(screens)
+            has_link = bool(link and link.startswith("http"))
+            if not has_files and not has_link:
+                return {"audit_rich": cached_audit, "cached": True}
 
     # ── Validate input ─────────────────────────────────────────────────────────
     has_files = bool(screens)

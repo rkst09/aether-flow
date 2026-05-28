@@ -1,7 +1,14 @@
 import uuid as uuid_lib
-from fastapi import APIRouter, HTTPException
+import os
+import re
+import tempfile
+from fastapi import APIRouter, Depends, HTTPException
+from fastapi import BackgroundTasks
+from fastapi.responses import FileResponse
 from pydantic import BaseModel
+from auth import get_current_user, get_project_for_user
 from database import get_supabase
+from generators.docx_generator import generate_persona_docs_docx
 from services.openai_client import chat_json
 
 router = APIRouter()
@@ -12,14 +19,52 @@ class PhaseRequest(BaseModel):
     re_run: bool = False
 
 
-@router.post("")
-async def run_docs(req: PhaseRequest):
+def _sanitize_filename(value: str) -> str:
+    cleaned = re.sub(r"[^A-Za-z0-9._-]+", "_", value).strip("._")
+    return cleaned or "Aether_Design_Documentation"
+
+
+@router.get("/export")
+async def export_docs(project_id: str, background_tasks: BackgroundTasks, user=Depends(get_current_user)):
     db = get_supabase()
 
-    res = db.table("projects").select("*").eq("id", req.project_id).single().execute()
-    if not res.data:
-        raise HTTPException(404, "Project not found")
-    project = res.data
+    project = get_project_for_user(db, project_id, user["id"])
+
+    cached = (
+        db.table("agent_runs")
+        .select("output_json")
+        .eq("project_id", project_id)
+        .eq("phase", 6)
+        .eq("status", "completed")
+        .order("created_at", desc=True)
+        .limit(1)
+        .execute()
+    )
+    persona_docs = (cached.data or [{}])[0].get("output_json", {}).get("persona_docs")
+    if not persona_docs:
+        raise HTTPException(404, "No documentation available for export")
+
+    temp_file = tempfile.NamedTemporaryFile(delete=False, suffix=".docx")
+    temp_file.close()
+
+    project_name = project.get("name") or "Aether Project"
+    generate_persona_docs_docx(persona_docs, temp_file.name, project_name=project_name)
+
+    background_tasks.add_task(os.remove, temp_file.name)
+
+    safe_name = _sanitize_filename(project_name)
+    return FileResponse(
+        temp_file.name,
+        media_type="application/vnd.openxmlformats-officedocument.wordprocessingml.document",
+        filename=f"{safe_name}_Design_Documentation.docx",
+    )
+
+
+@router.post("")
+async def run_docs(req: PhaseRequest, user=Depends(get_current_user)):
+    db = get_supabase()
+
+    project = get_project_for_user(db, req.project_id, user["id"])
 
     personas = db.table("personas").select("*").eq("project_id", req.project_id).execute().data or []
 
