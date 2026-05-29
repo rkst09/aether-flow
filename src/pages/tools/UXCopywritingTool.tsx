@@ -325,11 +325,17 @@ export default function UXCopywritingTool() {
       if (projErr || !proj) throw new Error(projErr?.message ?? "Failed to create project");
       setSavedProjId(proj.id);
 
-      const res = await runCopyReview(proj.id, files, false);
+      const res = await runCopyReview(
+        proj.id,
+        files,
+        isValidLink ? linkValue : "",
+        projectDesc,
+        false,
+      );
       setCopyData(res.copy_rich as RichScreenCopyReview[]);
       setPhase("results");
-    } catch (err: any) {
-      setApiError(err?.message ?? "Copy review failed. Make sure backend is running on http://localhost:8000");
+    } catch (err: unknown) {
+      setApiError(err instanceof Error ? err.message : "Copy review failed. Make sure backend is running on http://localhost:8000");
       setPhase("setup");
     }
   };

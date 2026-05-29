@@ -1,6 +1,6 @@
-import { useState, useEffect } from "react";
+import { useState, useEffect, useRef, type SVGProps } from "react";
 import { useNavigate, useParams } from "react-router-dom";
-import { runDocs } from "@/lib/api";
+import { confirmPhaseReview, downloadDocsExport, runDocs } from "@/lib/api";
 import { motion, AnimatePresence } from "framer-motion";
 import {
   ArrowLeft, Download, FileText, ChevronDown,
@@ -119,7 +119,7 @@ function exportPDF(data: PersonaDoc[]) {
   `).join("");
   const win = window.open("", "_blank");
   if (!win) return;
-  win.document.write(`<html><head><title>Aether Documentation</title><style>body{font-family:system-ui,sans-serif;max-width:800px;margin:40px auto;padding:0 24px;color:#1f2937;line-height:1.6;}h1{font-size:20px;border-bottom:2px solid #e5e7eb;padding-bottom:10px;margin-top:32px;}h2{font-size:16px;color:#374151;margin-top:24px;}h3{font-size:13px;color:#111827;margin-top:16px;}.screen{border:1px solid #e5e7eb;border-radius:8px;padding:14px;margin-bottom:10px;}.lbl{font-weight:600;color:#374151;}p{font-size:12px;color:#4b5563;margin:3px 0;}</style></head><body><h1 style="margin-top:0;font-size:24px;">Aether — Design Documentation</h1>${body}<script>window.onload=function(){window.print();}<\/script></body></html>`);
+  win.document.write(`<html><head><title>Aether Documentation</title><style>body{font-family:system-ui,sans-serif;max-width:800px;margin:40px auto;padding:0 24px;color:#1f2937;line-height:1.6;}h1{font-size:20px;border-bottom:2px solid #e5e7eb;padding-bottom:10px;margin-top:32px;}h2{font-size:16px;color:#374151;margin-top:24px;}h3{font-size:13px;color:#111827;margin-top:16px;}.screen{border:1px solid #e5e7eb;border-radius:8px;padding:14px;margin-bottom:10px;}.lbl{font-weight:600;color:#374151;}p{font-size:12px;color:#4b5563;margin:3px 0;}</style></head><body><h1 style="margin-top:0;font-size:24px;">Aether — Design Documentation</h1>${body}<script>window.onload=function(){window.print();}</script></body></html>`);
   win.document.close();
 }
 
@@ -127,7 +127,7 @@ function exportPDF(data: PersonaDoc[]) {
 
 function StageTracker({ current }: { current: number }) {
   const stages = [
-    { label: "Upload",    icon: ({ className }: any) => <svg className={className} viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.5"><path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"/><polyline points="17 8 12 3 7 8"/><line x1="12" y1="3" x2="12" y2="15"/></svg> },
+    { label: "Upload",    icon: ({ className }: SVGProps<SVGSVGElement>) => <svg className={className} viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.5"><path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"/><polyline points="17 8 12 3 7 8"/><line x1="12" y1="3" x2="12" y2="15"/></svg> },
     { label: "Intake",    icon: Brain    },
     { label: "Screens",   icon: Layers   },
     { label: "Prototype", icon: Cpu      },
@@ -364,7 +364,19 @@ function ModuleBlock({ mod }: { mod: ModuleDoc }) {
 
 // ─── Export Menu ──────────────────────────────────────────────────────────────
 
-function ExportMenu({ size = "sm", data }: { size?: "sm" | "default"; data: PersonaDoc[] }) {
+async function downloadServerDocx(projectId: string) {
+  await downloadDocsExport(projectId);
+}
+
+function ExportMenu({
+  size = "sm",
+  data,
+  projectId,
+}: {
+  size?: "sm" | "default";
+  data: PersonaDoc[];
+  projectId?: string;
+}) {
   return (
     <DropdownMenu>
       <DropdownMenuTrigger asChild>
@@ -375,7 +387,7 @@ function ExportMenu({ size = "sm", data }: { size?: "sm" | "default"; data: Pers
       </DropdownMenuTrigger>
       <DropdownMenuContent align="end" className="w-56">
         <DropdownMenuLabel>BA Handoff</DropdownMenuLabel>
-        <DropdownMenuItem onClick={() => exportDocx(data)}>
+        <DropdownMenuItem onClick={() => projectId ? downloadServerDocx(projectId) : exportDocx(data)}>
           <FileText className="h-3.5 w-3.5 mr-2" strokeWidth={1.5} />Download .docx
         </DropdownMenuItem>
         <DropdownMenuSeparator />
@@ -411,28 +423,68 @@ export default function DesignDocumentation() {
   const [genLabel,      setGenLabel]      = useState(0);
   const [warningsOpen,  setWarningsOpen]  = useState(true);
   const [apiError,      setApiError]      = useState<string | null>(null);
+  const [finalizeError, setFinalizeError] = useState<string | null>(null);
+  const [isFinalizing,  setIsFinalizing]  = useState(false);
+  const requestRef = useRef<AbortController | null>(null);
 
   useEffect(() => {
     if (!projectId) return;
+    const controller = new AbortController();
+    requestRef.current = controller;
     let idx = 0;
     const iv = setInterval(() => {
       idx = (idx + 1) % GENERATING_LABELS.length;
       setGenLabel(idx);
     }, 600);
-    runDocs(projectId)
+    runDocs(projectId, false, controller.signal)
       .then(({ persona_docs }) => {
+        if (controller.signal.aborted) return;
         clearInterval(iv);
         setPersonaDocs(persona_docs);
         setActivePersona(persona_docs[0]?.id ?? "");
         setDocPhase("complete");
       })
       .catch(err => {
-        clearInterval(iv);
-        setApiError(err.message ?? "Failed to generate documentation");
-        setDocPhase("preview");
+        if (!controller.signal.aborted) {
+          clearInterval(iv);
+          setApiError(err.message ?? "Failed to generate documentation");
+          setDocPhase("preview");
+        }
       });
-    return () => clearInterval(iv);
+    return () => {
+      clearInterval(iv);
+      controller.abort();
+    };
   }, [projectId]);
+
+  const cancelDocumentationRun = () => {
+    requestRef.current?.abort();
+    requestRef.current = null;
+    setDocPhase(personaDocs.length ? "complete" : "preview");
+    setApiError("Documentation generation cancelled.");
+  };
+
+  const rerunDocumentation = () => {
+    if (!projectId) return;
+    const controller = new AbortController();
+    requestRef.current?.abort();
+    requestRef.current = controller;
+    setApiError(null);
+    setDocPhase("generating");
+    runDocs(projectId, true, controller.signal)
+      .then(({ persona_docs }) => {
+        if (controller.signal.aborted) return;
+        setPersonaDocs(persona_docs);
+        setActivePersona(persona_docs[0]?.id ?? "");
+        setDocPhase("complete");
+      })
+      .catch(err => {
+        if (!controller.signal.aborted) {
+          setApiError(err.message);
+          setDocPhase("preview");
+        }
+      });
+  };
 
   const warnings     = collectWarnings(personaDocs);
   const completeness = personaDocs.length ? overallCompleteness(personaDocs) : 0;
@@ -442,6 +494,34 @@ export default function DesignDocumentation() {
   const statsModules  = personaDocs.reduce((s, p) => s + p.modules.length, 0);
   const statsScreens  = personaDocs.reduce((s, p) => s + p.modules.reduce((s2, m) => s2 + m.screens.length, 0), 0);
   const statsFlows    = personaDocs.reduce((s, p) => s + p.modules.reduce((s2, m) => s2 + m.flows.length, 0), 0);
+
+  const handleCompleteHandoff = async () => {
+    if (!projectId) {
+      navigate("/dashboard");
+      return;
+    }
+
+    try {
+      setIsFinalizing(true);
+      setFinalizeError(null);
+      await confirmPhaseReview(projectId, 6, {
+        summary: "Documentation reviewed and marked ready for handoff.",
+        metrics: {
+          persona_count: statsPersonas,
+          module_count: statsModules,
+          screen_count: statsScreens,
+          flow_count: statsFlows,
+          completeness,
+        },
+        status: "handoff_ready",
+      });
+      navigate("/dashboard");
+    } catch (error) {
+      setFinalizeError(error instanceof Error ? error.message : "Unable to mark the handoff ready right now.");
+    } finally {
+      setIsFinalizing(false);
+    }
+  };
 
   return (
     <SidebarProvider>
@@ -463,7 +543,12 @@ export default function DesignDocumentation() {
               </div>
             </div>
             <div className="flex items-center gap-2 flex-shrink-0">
-              {(docPhase === "preview" || docPhase === "complete") && <ExportMenu size="sm" data={personaDocs} />}
+              {(docPhase === "preview" || docPhase === "complete") && <ExportMenu size="sm" data={personaDocs} projectId={projectId} />}
+              {docPhase === "generating" && (
+                <Button variant="outline" size="sm" className="h-8 rounded-lg text-xs gap-1.5" onClick={cancelDocumentationRun}>
+                  Cancel
+                </Button>
+              )}
               <Button variant="ghost" size="sm" className="h-8 rounded-lg text-xs gap-1.5" onClick={() => navigate(projectId ? `/project/${projectId}/phase/05` : "/dashboard")}>
                 <ArrowLeft className="h-3.5 w-3.5" strokeWidth={1.5} />
                 <span className="hidden sm:inline">UX Copywriting</span>
@@ -516,6 +601,9 @@ export default function DesignDocumentation() {
                           animate={{ width: i <= genLabel ? 20 : 8 }} transition={{ duration: 0.3 }} />
                       ))}
                     </div>
+                    <Button variant="outline" size="sm" onClick={cancelDocumentationRun} className="rounded-xl text-xs gap-1.5">
+                      Cancel Generation
+                    </Button>
                   </motion.div>
                 )}
 
@@ -538,10 +626,10 @@ export default function DesignDocumentation() {
                             </div>
                           </div>
                           <div className="flex items-center gap-2 flex-shrink-0">
-                            <Button variant="ghost" size="sm" className="h-8 rounded-lg text-xs gap-1.5 text-emerald-700 dark:text-emerald-400 hover:bg-emerald-100 dark:hover:bg-emerald-900/30" onClick={() => navigate("/dashboard")}>
-                              <LayoutGrid className="h-3.5 w-3.5" strokeWidth={1.5} />Dashboard
-                            </Button>
-                            <ExportMenu size="sm" data={personaDocs} />
+	                            <Button variant="ghost" size="sm" className="h-8 rounded-lg text-xs gap-1.5 text-emerald-700 dark:text-emerald-400 hover:bg-emerald-100 dark:hover:bg-emerald-900/30" onClick={handleCompleteHandoff} disabled={isFinalizing}>
+	                              <LayoutGrid className="h-3.5 w-3.5" strokeWidth={1.5} />{isFinalizing ? "Saving..." : "Dashboard"}
+	                            </Button>
+                            <ExportMenu size="sm" data={personaDocs} projectId={projectId} />
                           </div>
                         </motion.div>
                       )}
@@ -673,7 +761,7 @@ export default function DesignDocumentation() {
                         <p className="text-sm font-semibold text-rose-900 dark:text-rose-100">Generation failed</p>
                         <p className="text-xs text-rose-700 dark:text-rose-400">{apiError}</p>
                         <Button
-                          onClick={() => { setApiError(null); setDocPhase("generating"); if (projectId) runDocs(projectId, true).then(({ persona_docs }) => { setPersonaDocs(persona_docs); setActivePersona(persona_docs[0]?.id ?? ""); setDocPhase("complete"); }).catch(err => { setApiError(err.message); setDocPhase("preview"); }); }}
+                          onClick={rerunDocumentation}
                           className="gradient-accent text-accent-foreground hover:brightness-110 shadow-soft h-9 px-6 rounded-xl text-sm font-medium"
                         >
                           Retry
@@ -694,13 +782,14 @@ export default function DesignDocumentation() {
                 className="shrink-0 border-t border-border bg-background/95 backdrop-blur px-6 py-4 flex items-center justify-between gap-4">
                 <div>
                   <p className="text-sm font-semibold">Phase 06 complete</p>
+                  {finalizeError ? <p className="text-xs text-destructive">{finalizeError}</p> : null}
                   <p className="text-xs text-muted-foreground">Project saved · All phases complete · Ready for handoff</p>
                 </div>
                 <div className="flex items-center gap-2 flex-shrink-0">
-                  <Button variant="ghost" size="sm" className="h-9 rounded-xl text-xs gap-1.5" onClick={() => navigate("/dashboard")}>
-                    <LayoutGrid className="h-3.5 w-3.5" strokeWidth={1.5} />Go to Dashboard
+                  <Button variant="ghost" size="sm" className="h-9 rounded-xl text-xs gap-1.5" onClick={handleCompleteHandoff} disabled={isFinalizing}>
+                    <LayoutGrid className="h-3.5 w-3.5" strokeWidth={1.5} />{isFinalizing ? "Saving..." : "Go to Dashboard"}
                   </Button>
-                  <ExportMenu size="default" data={personaDocs} />
+                  <ExportMenu size="default" data={personaDocs} projectId={projectId} />
                 </div>
               </motion.div>
             )}

@@ -8,8 +8,9 @@ import base64
 import io
 from typing import Optional, List
 
-from fastapi import APIRouter, HTTPException, UploadFile, File, Form
+from fastapi import APIRouter, Depends, HTTPException, UploadFile, File, Form
 
+from auth import get_current_user, get_project_for_user
 from database import get_supabase
 from services.openai_client import chat_vision, chat_json
 
@@ -38,6 +39,43 @@ async def _file_to_block(file: UploadFile) -> dict:
         "data": base64.b64encode(raw).decode("utf-8"),
         "name": name,
     }
+
+
+async def _fetch_url_content(url: str) -> str:
+    """Fetch visible page content so link-only reviews aren't blind."""
+    import httpx
+    from html.parser import HTMLParser
+
+    class _Extractor(HTMLParser):
+        def __init__(self):
+            super().__init__()
+            self._skip = False
+            self._skip_tags = {"script", "style", "noscript", "svg", "meta", "head"}
+            self.chunks: list[str] = []
+
+        def handle_starttag(self, tag, attrs):
+            if tag in self._skip_tags:
+                self._skip = True
+
+        def handle_endtag(self, tag):
+            if tag in self._skip_tags:
+                self._skip = False
+
+        def handle_data(self, data):
+            if not self._skip:
+                text = data.strip()
+                if text:
+                    self.chunks.append(text)
+
+    try:
+        async with httpx.AsyncClient(timeout=15, follow_redirects=True) as client:
+            response = await client.get(url, headers={"User-Agent": "Mozilla/5.0 (compatible; AetherBot/1.0)"})
+            html = response.text
+        parser = _Extractor()
+        parser.feed(html)
+        return " | ".join(parser.chunks[:300])[:6000]
+    except Exception as exc:
+        return f"(Could not fetch URL: {exc})"
 
 
 def _build_prompt(
@@ -200,8 +238,11 @@ Rules:
 @router.post("")
 async def run_copy_review(
     project_id: str = Form(""),
+    link: Optional[str] = Form(None),
+    context: Optional[str] = Form(None),
     re_run: bool = Form(False),
     screens: List[UploadFile] = File(default=[]),
+    user=Depends(get_current_user),
 ):
     db = get_supabase()
 
@@ -211,14 +252,29 @@ async def run_copy_review(
     project_desc = ""
 
     if project_id:
-        res = db.table("projects").select("*").eq("id", project_id).single().execute()
-        if res.data:
-            project = res.data
+        project = get_project_for_user(db, project_id, user["id"])
+        if project:
             project_desc = project.get("description") or ""
             persona_rows = db.table("personas").select("name").eq("project_id", project_id).execute().data or []
             persona_names = [p["name"] for p in persona_rows]
 
     project_name = project["name"] if project else "UX Copy Review"
+
+    # ── Return cached result when available ────────────────────────────────────
+    if project_id and not re_run:
+        cached_run = (
+            db.table("agent_runs")
+            .select("output_json")
+            .eq("project_id", project_id)
+            .eq("phase", 5)
+            .eq("status", "completed")
+            .order("created_at", desc=True)
+            .limit(1)
+            .execute()
+        )
+        cached_review = (cached_run.data or [{}])[0].get("output_json", {}).get("copy_rich")
+        if cached_review and not screens and not (link and link.startswith("http")):
+            return {"copy_rich": cached_review, "cached": True}
 
     # ── Load Phase 04 audit findings as context ────────────────────────────────
     audit_summary = ""
@@ -249,8 +305,10 @@ async def run_copy_review(
                 break
 
     # ── Validate ───────────────────────────────────────────────────────────────
-    if not screens:
-        raise HTTPException(400, "Upload at least one screen image to run the copy review.")
+    has_screens = bool(screens)
+    has_link = bool(link and link.startswith("http"))
+    if not has_screens and not has_link:
+        raise HTTPException(400, "Upload at least one screen image or provide a URL to run the copy review.")
 
     # ── Log run ────────────────────────────────────────────────────────────────
     run_id: str | None = None
@@ -259,7 +317,7 @@ async def run_copy_review(
             "project_id": project_id,
             "phase": 5,
             "status": "running",
-            "input_json": {"step": "copy_review", "screen_count": len(screens)},
+            "input_json": {"step": "copy_review", "screen_count": len(screens), "link": link, "context": context},
         }).execute()
         run_id = run.data[0]["id"]
 
@@ -269,15 +327,35 @@ async def run_copy_review(
         images    = [b for b in blocks if b["type"] == "image"]
         pdf_texts = [b for b in blocks if b["type"] == "text"]
         screen_names = [b["name"] for b in blocks]
+        url_content = ""
+
+        if has_link:
+            from urllib.parse import urlparse
+
+            parsed = urlparse(link or "")
+            if not screen_names:
+                screen_names = [parsed.netloc or "Website"]
+            url_content = await _fetch_url_content(link or "")
 
         system_prompt, user_prompt = _build_prompt(
-            project_name, project_desc, screen_names, persona_names, audit_summary
+            project_name,
+            context or project_desc,
+            screen_names,
+            persona_names,
+            audit_summary,
         )
 
         if pdf_texts:
             user_prompt += "\n\n" + "\n\n".join(
                 f"SCREEN '{b['name']}' (PDF text):\n{b['text']}" for b in pdf_texts
             )
+
+        if has_link:
+            user_prompt += f"\n\nPRODUCT URL:\n{link}"
+            if url_content:
+                user_prompt += f"\n\nVISIBLE PAGE CONTENT:\n{url_content}"
+            if context:
+                user_prompt += f"\n\nADDITIONAL CONTEXT:\n{context}"
 
         # ── Call AI ────────────────────────────────────────────────────────────
         if images:

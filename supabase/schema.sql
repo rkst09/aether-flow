@@ -96,12 +96,57 @@ alter table public.backlog_items enable row level security;
 alter table public.screens       enable row level security;
 alter table public.agent_runs    enable row level security;
 
-create policy "own_projects"      on public.projects      for all using (auth.uid() = user_id);
-create policy "own_personas"      on public.personas      for all using (exists (select 1 from public.projects p where p.id = personas.project_id      and p.user_id = auth.uid()));
-create policy "own_journey_maps"  on public.journey_maps  for all using (exists (select 1 from public.projects p where p.id = journey_maps.project_id  and p.user_id = auth.uid()));
-create policy "own_backlog_items" on public.backlog_items for all using (exists (select 1 from public.projects p where p.id = backlog_items.project_id  and p.user_id = auth.uid()));
-create policy "own_screens"       on public.screens       for all using (exists (select 1 from public.projects p where p.id = screens.project_id       and p.user_id = auth.uid()));
-create policy "own_agent_runs"    on public.agent_runs    for all using (exists (select 1 from public.projects p where p.id = agent_runs.project_id    and p.user_id = auth.uid()));
+drop policy if exists "projects_select_own" on public.projects;
+drop policy if exists "projects_insert_own" on public.projects;
+drop policy if exists "projects_update_own" on public.projects;
+drop policy if exists "projects_delete_own" on public.projects;
+drop policy if exists "personas_manage_own" on public.personas;
+drop policy if exists "journey_maps_manage_own" on public.journey_maps;
+drop policy if exists "backlog_items_manage_own" on public.backlog_items;
+drop policy if exists "screens_manage_own" on public.screens;
+drop policy if exists "agent_runs_manage_own" on public.agent_runs;
+
+create policy "projects_select_own"
+  on public.projects for select
+  using (auth.uid() = user_id);
+
+create policy "projects_insert_own"
+  on public.projects for insert
+  with check (auth.uid() = user_id);
+
+create policy "projects_update_own"
+  on public.projects for update
+  using (auth.uid() = user_id)
+  with check (auth.uid() = user_id);
+
+create policy "projects_delete_own"
+  on public.projects for delete
+  using (auth.uid() = user_id);
+
+create policy "personas_manage_own"
+  on public.personas for all
+  using (exists (select 1 from public.projects p where p.id = personas.project_id and p.user_id = auth.uid()))
+  with check (exists (select 1 from public.projects p where p.id = personas.project_id and p.user_id = auth.uid()));
+
+create policy "journey_maps_manage_own"
+  on public.journey_maps for all
+  using (exists (select 1 from public.projects p where p.id = journey_maps.project_id and p.user_id = auth.uid()))
+  with check (exists (select 1 from public.projects p where p.id = journey_maps.project_id and p.user_id = auth.uid()));
+
+create policy "backlog_items_manage_own"
+  on public.backlog_items for all
+  using (exists (select 1 from public.projects p where p.id = backlog_items.project_id and p.user_id = auth.uid()))
+  with check (exists (select 1 from public.projects p where p.id = backlog_items.project_id and p.user_id = auth.uid()));
+
+create policy "screens_manage_own"
+  on public.screens for all
+  using (exists (select 1 from public.projects p where p.id = screens.project_id and p.user_id = auth.uid()))
+  with check (exists (select 1 from public.projects p where p.id = screens.project_id and p.user_id = auth.uid()));
+
+create policy "agent_runs_manage_own"
+  on public.agent_runs for all
+  using (exists (select 1 from public.projects p where p.id = agent_runs.project_id and p.user_id = auth.uid()))
+  with check (exists (select 1 from public.projects p where p.id = agent_runs.project_id and p.user_id = auth.uid()));
 
 -- ─── Storage ──────────────────────────────────────────────────────────────────
 

@@ -1,11 +1,81 @@
-const BASE_URL = import.meta.env.VITE_API_URL || "http://localhost:8000";
+import { API_BASE_URL, RAW_API_BASE_URL, getApiBaseCandidates, hasProductionApiMisconfiguration } from "@/lib/env";
+import { captureClientError, captureClientWarning } from "@/lib/telemetry";
+import { supabase } from "@/lib/supabase";
 
-async function request<T>(path: string, body?: object): Promise<T> {
-  const res = await fetch(`${BASE_URL}${path}`, {
-    method: "POST",
-    headers: { "Content-Type": "application/json" },
-    body: JSON.stringify(body ?? {}),
-  });
+const BASE_URL = API_BASE_URL;
+const API_BASE_CANDIDATES = getApiBaseCandidates(RAW_API_BASE_URL);
+const inflightRequests = new Map<string, Promise<unknown>>();
+
+async function getAccessToken() {
+  const { data } = await supabase.auth.getSession();
+  return data.session?.access_token ?? "";
+}
+
+const TIMEOUT_MS = 120_000;
+
+function createTimeoutSignal() {
+  if (typeof AbortSignal !== "undefined" && typeof AbortSignal.timeout === "function") {
+    return AbortSignal.timeout(TIMEOUT_MS);
+  }
+
+  const controller = new AbortController();
+  const timeoutId = globalThis.setTimeout(() => {
+    controller.abort(new DOMException("Request timed out", "TimeoutError"));
+  }, TIMEOUT_MS);
+
+  controller.signal.addEventListener("abort", () => globalThis.clearTimeout(timeoutId), { once: true });
+  return controller.signal;
+}
+
+function withTimeout(signal?: AbortSignal): AbortSignal {
+  const timeout = createTimeoutSignal();
+  if (!signal) return timeout;
+  const controller = new AbortController();
+  const abort = () => controller.abort();
+  signal.addEventListener("abort", abort, { once: true });
+  timeout.addEventListener("abort", abort, { once: true });
+  return controller.signal;
+}
+
+function buildRequestUrl(baseUrl: string, path: string) {
+  return `${baseUrl}${path}`;
+}
+
+function isLocalApiCandidate(url: string) {
+  return /^(https?:\/\/)?(localhost|127\.0\.0\.1)(:\d+)?/i.test(url);
+}
+
+async function authorizedFetch(path: string, init: RequestInit = {}, signal?: AbortSignal) {
+  const token = await getAccessToken();
+  const headers = new Headers(init.headers ?? {});
+  if (token) {
+    headers.set("Authorization", `Bearer ${token}`);
+  }
+
+  const requestInit = {
+    ...init,
+    headers,
+    signal: withTimeout(signal ?? (init.signal as AbortSignal | undefined)),
+  };
+
+  let lastNetworkError: unknown = null;
+
+  for (const baseUrl of API_BASE_CANDIDATES) {
+    try {
+      return await fetch(buildRequestUrl(baseUrl, path), requestInit);
+    } catch (error) {
+      if (error instanceof TypeError) {
+        lastNetworkError = error;
+        continue;
+      }
+      throw error;
+    }
+  }
+
+  throw lastNetworkError ?? new TypeError("Failed to reach any configured API base URL.");
+}
+
+async function parseResponse<T>(res: Response): Promise<T> {
   if (!res.ok) {
     const err = await res.json().catch(() => ({ detail: res.statusText }));
     const detail = typeof err.detail === "string" ? err.detail : JSON.stringify(err.detail);
@@ -14,13 +84,107 @@ async function request<T>(path: string, body?: object): Promise<T> {
   return res.json();
 }
 
+function dedupeRequest<T>(key: string, signal: AbortSignal | undefined, requestFactory: () => Promise<T>) {
+  if (signal) {
+    return requestFactory();
+  }
+
+  const existing = inflightRequests.get(key);
+  if (existing) {
+    return existing as Promise<T>;
+  }
+
+  const pending = requestFactory().finally(() => inflightRequests.delete(key));
+  inflightRequests.set(key, pending);
+  return pending;
+}
+
+function fileSignature(files: File[]) {
+  return files
+    .map(file => `${file.name}:${file.size}:${file.lastModified}`)
+    .sort()
+    .join("|");
+}
+
+function normalizeRequestError(error: unknown, path: string) {
+  if (error instanceof Error) {
+    if (
+      error.message === "Missing authorization header" ||
+      error.message === "Invalid authorization header" ||
+      error.message === "Invalid or expired session" ||
+      error.message === "Session expired"
+    ) {
+      return new Error("Your session expired. Sign in again, then retry this step.");
+    }
+
+    if (error.message.startsWith("Auth validation unavailable:")) {
+      return new Error("Unable to validate your session with Supabase right now. Check backend/.env, confirm the API can reach Supabase, then restart the backend.");
+    }
+
+    if (error.message === "Project not found") {
+      return new Error("This project could not be found for your account. Open it again from Projects, or sign in with the correct workspace account.");
+    }
+  }
+
+  if (error instanceof DOMException && error.name === "AbortError") {
+    return new Error("Request cancelled.");
+  }
+
+  if (error instanceof DOMException && error.name === "TimeoutError") {
+    return new Error("Request timed out after 2 minutes. Please try again.");
+  }
+
+  if (error instanceof TypeError) {
+    if (typeof navigator !== "undefined" && navigator.onLine === false) {
+      return new Error("You appear to be offline. Reconnect and try again.");
+    }
+    if (API_BASE_CANDIDATES.some(isLocalApiCandidate)) {
+      return new Error(`Local backend is not reachable for ${path}. Start the API server and confirm http://127.0.0.1:8000/health returns ok.`);
+    }
+    return new Error(`Unable to reach the backend for ${path}. Check your API configuration and deployment URL.`);
+  }
+
+  return error instanceof Error ? error : new Error("Request failed");
+}
+
+async function runRequest<T>(path: string, requestFactory: () => Promise<T>) {
+  try {
+    if (hasProductionApiMisconfiguration(RAW_API_BASE_URL)) {
+      captureClientWarning("Production API URL was configured with localhost. Falling back to same-origin requests.", {
+        raw_api_url: RAW_API_BASE_URL,
+      });
+    }
+    return await requestFactory();
+  } catch (error) {
+    const normalized = normalizeRequestError(error, path);
+    if (normalized.message !== "Request cancelled.") {
+      captureClientError(normalized.message, { path, api_base_url: BASE_URL });
+    }
+    throw normalized;
+  }
+}
+
+async function request<T>(path: string, body?: object, signal?: AbortSignal): Promise<T> {
+  const requestKey = `json:${path}:${JSON.stringify(body ?? {})}`;
+  return runRequest(path, () =>
+    dedupeRequest(requestKey, signal, async () => {
+      const res = await authorizedFetch(path, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify(body ?? {}),
+      }, signal);
+      return parseResponse<T>(res);
+    }),
+  );
+}
+
 // ── Phase 01 — Design Intake ──────────────────────────────────────────────────
 
-export const runPersonas = (projectId: string, reRun = false) =>
+export const runPersonas = (projectId: string, reRun = false, signal?: AbortSignal) =>
   request<{ personas_rich: RichPersona[]; cached: boolean }>("/api/phase/01/personas", {
     project_id: projectId,
     re_run: reRun,
-  });
+  }, signal);
 
 export const savePersonas = (projectId: string, personasRich: RichPersona[]) =>
   request<{ saved: boolean }>("/api/phase/01/personas/save", {
@@ -28,11 +192,11 @@ export const savePersonas = (projectId: string, personasRich: RichPersona[]) =>
     personas_rich: personasRich,
   });
 
-export const runJourney = (projectId: string, reRun = false) =>
+export const runJourney = (projectId: string, reRun = false, signal?: AbortSignal) =>
   request<{ journeys_rich: RichJourneyMap[]; cached: boolean }>("/api/phase/01/journey", {
     project_id: projectId,
     re_run: reRun,
-  });
+  }, signal);
 
 export const saveJourneys = (projectId: string, journeysRich: RichJourneyMap[]) =>
   request<{ saved: boolean }>("/api/phase/01/journey/save", {
@@ -40,27 +204,27 @@ export const saveJourneys = (projectId: string, journeysRich: RichJourneyMap[]) 
     journeys_rich: journeysRich,
   });
 
-export const runBacklog = (projectId: string, reRun = false) =>
+export const runBacklog = (projectId: string, reRun = false, signal?: AbortSignal) =>
   request<{ backlog_rich: RichBacklogModule[]; cached: boolean }>("/api/phase/01/backlog", {
     project_id: projectId,
     re_run: reRun,
-  });
+  }, signal);
 
 // ── Phase 02 — Screen Derivation ──────────────────────────────────────────────
 
-export const runScreens = (projectId: string, reRun = false) =>
+export const runScreens = (projectId: string, reRun = false, signal?: AbortSignal) =>
   request<{ screens_rich: RichScreenModule[]; cached: boolean }>("/api/phase/02/screens", {
     project_id: projectId,
     re_run: reRun,
-  });
+  }, signal);
 
 // ── Phase 03 — Prototype Prompts ──────────────────────────────────────────────
 
-export const runPrompts = (projectId: string, reRun = false) =>
+export const runPrompts = (projectId: string, reRun = false, signal?: AbortSignal) =>
   request<{ prompts_rich: RichPersonaPrompt[]; system_prompt: RichSystemPrompt; cached: boolean }>("/api/phase/03/prompts", {
     project_id: projectId,
     re_run: reRun,
-  });
+  }, signal);
 
 // ── Phase 04 — UX Audit ───────────────────────────────────────────────────────
 
@@ -70,6 +234,7 @@ export const runAudit = (
   link: string = "",
   context: string = "",
   reRun = false,
+  signal?: AbortSignal,
 ): Promise<{ audit_rich: RichScreenAudit[]; cached: boolean }> => {
   const form = new FormData();
   form.append("project_id", projectId);
@@ -77,15 +242,12 @@ export const runAudit = (
   if (link) form.append("link", link);
   if (context) form.append("context", context);
   if (reRun) form.append("re_run", "true");
-  return fetch(`${BASE_URL}/api/phase/04/audit`, { method: "POST", body: form })
-    .then(async res => {
-      if (!res.ok) {
-        const err = await res.json().catch(() => ({ detail: res.statusText }));
-        const detail = typeof err.detail === "string" ? err.detail : JSON.stringify(err.detail);
-        throw new Error(detail || `Request failed: ${res.status}`);
-      }
-      return res.json();
-    });
+  const requestKey = `form:/api/phase/04/audit:${projectId}:${fileSignature(files)}:${link}:${context}:${String(reRun)}`;
+  return runRequest("/api/phase/04/audit", () =>
+    dedupeRequest(requestKey, signal, () =>
+      authorizedFetch("/api/phase/04/audit", { method: "POST", body: form }, signal).then(parseResponse),
+    ),
+  );
 };
 
 // ── Phase 05 — UX Copy Review ─────────────────────────────────────────────────
@@ -93,30 +255,77 @@ export const runAudit = (
 export const runCopyReview = (
   projectId: string,
   files: File[] = [],
+  link: string = "",
+  context: string = "",
   reRun = false,
+  signal?: AbortSignal,
 ): Promise<{ copy_rich: RichScreenCopyReview[]; cached: boolean }> => {
   const form = new FormData();
   form.append("project_id", projectId);
   files.forEach(f => form.append("screens", f));
+  if (link) form.append("link", link);
+  if (context) form.append("context", context);
   form.append("re_run", String(reRun));
-  return fetch(`${BASE_URL}/api/phase/05/copy`, { method: "POST", body: form })
-    .then(async res => {
-      if (!res.ok) {
-        const err = await res.json().catch(() => ({ detail: res.statusText }));
-        const detail = typeof err.detail === "string" ? err.detail : JSON.stringify(err.detail);
-        throw new Error(detail || `Request failed: ${res.status}`);
-      }
-      return res.json();
-    });
+  const requestKey = `form:/api/phase/05/copy:${projectId}:${fileSignature(files)}:${link}:${context}:${String(reRun)}`;
+  return runRequest("/api/phase/05/copy", () =>
+    dedupeRequest(requestKey, signal, () =>
+      authorizedFetch("/api/phase/05/copy", { method: "POST", body: form }, signal).then(parseResponse),
+    ),
+  );
 };
 
 // ── Phase 06 — Documentation ──────────────────────────────────────────────────
 
-export const runDocs = (projectId: string, reRun = false) =>
+export const runDocs = (projectId: string, reRun = false, signal?: AbortSignal) =>
   request<{ persona_docs: RichPersonaDoc[]; cached: boolean }>("/api/phase/06/docs", {
     project_id: projectId,
     re_run: reRun,
+  }, signal);
+
+export type PhaseReviewStatus = "reviewed" | "handoff_ready";
+
+export const confirmPhaseReview = (
+  projectId: string,
+  phase: number,
+  options?: {
+    nextPhase?: number;
+    summary?: string;
+    metrics?: Record<string, unknown>;
+    status?: PhaseReviewStatus;
+  },
+) =>
+  request<{ ok: boolean; phase: number; next_phase: number; status: PhaseReviewStatus }>("/api/phase/confirm", {
+    project_id: projectId,
+    phase,
+    next_phase: options?.nextPhase,
+    summary: options?.summary ?? "",
+    metrics: options?.metrics ?? {},
+    status: options?.status ?? "reviewed",
   });
+
+export const downloadDocsExport = async (projectId: string) => {
+  const res = await authorizedFetch(
+    `/api/phase/06/docs/export?project_id=${encodeURIComponent(projectId)}`,
+  );
+  if (!res.ok) {
+    const err = await res.json().catch(() => ({ detail: res.statusText }));
+    const detail = typeof err.detail === "string" ? err.detail : JSON.stringify(err.detail);
+    throw new Error(detail || `Request failed: ${res.status}`);
+  }
+
+  const blob = await res.blob();
+  const disposition = res.headers.get("Content-Disposition") || "";
+  const match = disposition.match(/filename="?([^"]+)"?/i);
+  const filename = match?.[1] || "Aether_Design_Documentation.docx";
+  const url = window.URL.createObjectURL(blob);
+  const anchor = document.createElement("a");
+  anchor.href = url;
+  anchor.download = filename;
+  document.body.appendChild(anchor);
+  anchor.click();
+  anchor.remove();
+  window.URL.revokeObjectURL(url);
+};
 
 // ── Types ─────────────────────────────────────────────────────────────────────
 

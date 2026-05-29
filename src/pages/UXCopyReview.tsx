@@ -1,6 +1,6 @@
-import { useState, useRef, useEffect } from "react";
+import { useState, useRef, useEffect, useMemo } from "react";
 import { useNavigate, useParams, useLocation } from "react-router-dom";
-import { runCopyReview, type RichScreenCopyReview } from "@/lib/api";
+import { confirmPhaseReview, runCopyReview, type RichScreenCopyReview } from "@/lib/api";
 import { motion, AnimatePresence } from "framer-motion";
 import {
   ArrowLeft, ArrowRight, ChevronDown, ChevronRight,
@@ -529,7 +529,10 @@ const UXCopyReview = () => {
   const { id: routeProjectId } = useParams<{ id: string }>();
 
   // Files passed from Phase 04 via router state
-  const passedFiles = (location.state?.files as File[]) || [];
+  const passedFiles = useMemo(
+    () => ((location.state?.files as File[] | undefined) ?? []),
+    [location.state],
+  );
 
   const [files,       setFiles]       = useState<File[]>(passedFiles);
   const [previews,    setPreviews]    = useState<Record<string, string>>(() => {
@@ -543,21 +546,44 @@ const UXCopyReview = () => {
   const [reviewData,  setReviewData]  = useState<ScreenCopyReview[]>([]);
   const [generating,  setGenerating]  = useState(true);
   const [apiError,    setApiError]    = useState<string | null>(null);
+  const [finalizeError, setFinalizeError] = useState<string | null>(null);
+  const [isFinalizing, setIsFinalizing] = useState(false);
+  const requestRef = useRef<AbortController | null>(null);
+
+  useEffect(() => {
+    return () => {
+      Object.values(previews).forEach(URL.revokeObjectURL);
+    };
+  }, [previews]);
 
   // Auto-run when in project context, passing the audit screens
   useEffect(() => {
     if (!routeProjectId) return;
+    const controller = new AbortController();
+    requestRef.current = controller;
     setGenerating(true);
     setReviewPhase("running");
     setApiError(null);
-    runCopyReview(routeProjectId, passedFiles)
-      .then(res => { setReviewData(res.copy_rich as ScreenCopyReview[]); setReviewPhase("results"); })
-      .catch(err => {
-        setApiError(err?.message ?? "Failed to load copy review. Make sure backend is running on http://localhost:8000");
-        setReviewPhase("setup");
+    runCopyReview(routeProjectId, passedFiles, "", "", false, controller.signal)
+      .then(res => {
+        if (controller.signal.aborted) return;
+        setReviewData(res.copy_rich as ScreenCopyReview[]);
+        setReviewPhase("results");
       })
-      .finally(() => setGenerating(false));
-  }, [routeProjectId]);
+      .catch(err => {
+        if (!controller.signal.aborted) {
+          setApiError(err?.message ?? "Failed to load copy review.");
+          setReviewPhase("setup");
+        }
+      })
+      .finally(() => {
+        if (!controller.signal.aborted) {
+          setGenerating(false);
+          if (requestRef.current === controller) requestRef.current = null;
+        }
+      });
+    return () => controller.abort();
+  }, [routeProjectId, passedFiles]);
 
   const hasInput = files.length > 0;
 
@@ -566,21 +592,42 @@ const UXCopyReview = () => {
       const previewMap: Record<string, string> = {};
       files.forEach(f => { previewMap[f.name.replace(/\.[^/.]+$/, "")] = URL.createObjectURL(f); });
       setPreviews(prev => { Object.values(prev).forEach(u => URL.revokeObjectURL(u)); return previewMap; });
+      const controller = new AbortController();
+      requestRef.current?.abort();
+      requestRef.current = controller;
       setGenerating(true);
       setReviewPhase("running");
       setApiError(null);
-      runCopyReview(routeProjectId, files, true)
-        .then(res => { setReviewData(res.copy_rich as ScreenCopyReview[]); setReviewPhase("results"); })
-        .catch(err => { setApiError(err?.message ?? "Review failed"); setReviewPhase("setup"); })
-        .finally(() => setGenerating(false));
+      runCopyReview(routeProjectId, files, "", "", true, controller.signal)
+        .then(res => {
+          if (controller.signal.aborted) return;
+          setReviewData(res.copy_rich as ScreenCopyReview[]);
+          setReviewPhase("results");
+        })
+        .catch(err => {
+          if (!controller.signal.aborted) {
+            setApiError(err?.message ?? "Review failed");
+            setReviewPhase("setup");
+          }
+        })
+        .finally(() => {
+          if (!controller.signal.aborted) {
+            setGenerating(false);
+            if (requestRef.current === controller) requestRef.current = null;
+          }
+        });
     } else {
       setReviewPhase("running");
       setTimeout(() => setReviewPhase("results"), 2500);
     }
   };
 
-  const handleProceed = () => {
-    navigate(routeProjectId ? `/project/${routeProjectId}/phase/06` : "/dashboard");
+  const cancelReviewRun = () => {
+    requestRef.current?.abort();
+    requestRef.current = null;
+    setGenerating(false);
+    setReviewPhase(reviewData.length ? "results" : "setup");
+    setApiError("Copy review cancelled.");
   };
 
   const allItems     = getAllItems(reviewData);
@@ -588,6 +635,32 @@ const UXCopyReview = () => {
   const worstScreen  = reviewData.length ? reviewData.reduce((a, b) =>
     b.items.filter(i => i.severity === "High").length > a.items.filter(i => i.severity === "High").length ? b : a
   ) : null;
+
+  const handleProceed = async () => {
+    if (!routeProjectId) {
+      navigate("/dashboard");
+      return;
+    }
+
+    try {
+      setIsFinalizing(true);
+      setFinalizeError(null);
+      await confirmPhaseReview(routeProjectId, 5, {
+        nextPhase: 6,
+        summary: "UX copy review approved for documentation handoff.",
+        metrics: {
+          screen_count: reviewData.length,
+          issue_count: allItems.length,
+          high_priority_count: highCount,
+        },
+      });
+      navigate(`/project/${routeProjectId}/phase/06`);
+    } catch (error) {
+      setFinalizeError(error instanceof Error ? error.message : "Unable to confirm the copy review right now.");
+    } finally {
+      setIsFinalizing(false);
+    }
+  };
 
   if (generating && reviewPhase === "running") return (
     <SidebarProvider>
@@ -604,6 +677,9 @@ const UXCopyReview = () => {
           <div className="flex gap-1 mt-2">
             {[0,1,2].map(i => <div key={i} className="h-1.5 w-1.5 rounded-full bg-accent/40 animate-bounce" style={{ animationDelay: `${i * 0.15}s` }} />)}
           </div>
+          <Button variant="outline" size="sm" onClick={cancelReviewRun} className="rounded-xl text-xs gap-1.5">
+            Cancel Review
+          </Button>
         </div>
       </div>
     </SidebarProvider>
@@ -658,17 +734,22 @@ const UXCopyReview = () => {
 
               <Button size="sm"
                 onClick={reviewPhase === "setup" ? handleRunReview : handleProceed}
-                disabled={reviewPhase === "setup" && !hasInput}
+                disabled={(reviewPhase === "setup" && !hasInput) || isFinalizing}
                 className={cn("h-8 rounded-lg text-xs gap-1.5",
                   reviewPhase === "results" || hasInput
                     ? "gradient-accent text-accent-foreground hover:brightness-110 shadow-soft"
                     : "opacity-40 cursor-not-allowed",
                 )}>
                 {reviewPhase === "results"
-                  ? <><span>Proceed to Documentation</span><ArrowRight className="h-3.5 w-3.5" strokeWidth={1.5} /></>
+                  ? <><span>{isFinalizing ? "Confirming..." : "Proceed to Documentation"}</span><ArrowRight className="h-3.5 w-3.5" strokeWidth={1.5} /></>
                   : <><span>Run Review</span><FileText className="h-3.5 w-3.5" strokeWidth={1.5} /></>
                 }
               </Button>
+              {reviewPhase === "running" && (
+                <Button variant="outline" size="sm" onClick={cancelReviewRun} className="h-8 rounded-lg text-xs gap-1.5">
+                  Cancel
+                </Button>
+              )}
             </div>
           </header>
 
@@ -821,8 +902,9 @@ const UXCopyReview = () => {
               <div className="max-w-4xl mx-auto flex items-center justify-between gap-4 flex-wrap">
                 <div className="space-y-0.5">
                   <p className="text-sm font-medium text-foreground">{allItems.length} copy items reviewed · {highCount} high-priority rewrites</p>
-                  <p className="text-xs text-muted-foreground">Tone guide ready for export</p>
-                </div>
+	                  <p className="text-xs text-muted-foreground">Tone guide ready for export</p>
+	                  {finalizeError ? <p className="text-xs text-destructive">{finalizeError}</p> : null}
+	                </div>
                 <div className="flex items-center gap-2">
                   <DropdownMenu>
                     <DropdownMenuTrigger asChild>
@@ -843,11 +925,12 @@ const UXCopyReview = () => {
                       </DropdownMenuItem>
                     </DropdownMenuContent>
                   </DropdownMenu>
-                  <Button onClick={handleProceed}
-                    className="h-10 rounded-xl text-sm gap-1.5 gradient-accent text-accent-foreground hover:brightness-110 shadow-soft">
-                    Proceed to Documentation
-                    <ArrowRight className="h-4 w-4" strokeWidth={1.5} />
-                  </Button>
+	                  <Button onClick={handleProceed}
+	                    disabled={isFinalizing}
+	                    className="h-10 rounded-xl text-sm gap-1.5 gradient-accent text-accent-foreground hover:brightness-110 shadow-soft">
+	                    {isFinalizing ? "Confirming..." : "Proceed to Documentation"}
+	                    <ArrowRight className="h-4 w-4" strokeWidth={1.5} />
+	                  </Button>
                 </div>
               </div>
             </div>

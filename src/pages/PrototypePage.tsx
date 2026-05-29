@@ -1,6 +1,6 @@
-import { useState, useEffect } from "react";
+import { useState, useEffect, useRef } from "react";
 import { useNavigate, useParams } from "react-router-dom";
-import { runPrompts, type RichPersonaPrompt, type RichSystemPrompt } from "@/lib/api";
+import { confirmPhaseReview, runPrompts, type RichPersonaPrompt, type RichSystemPrompt } from "@/lib/api";
 import { motion, AnimatePresence } from "framer-motion";
 import {
   ArrowLeft, ArrowRight,
@@ -162,7 +162,7 @@ function StageTracker({ current }: { current: number }) {
                 )}>
                   <s.icon className="h-3 w-3" strokeWidth={1.5} />
                   <span className="hidden sm:inline">{s.label}</span>
-                </div>
+	              </div>
               </TooltipTrigger>
               <TooltipContent side="bottom">{s.label}</TooltipContent>
             </Tooltip>
@@ -354,22 +354,52 @@ const PrototypePage = () => {
   const [isRegenerating,     setIsRegenerating]     = useState(false);
   const [generating,         setGenerating]         = useState(true);
   const [apiError,           setApiError]           = useState<string | null>(null);
+  const [finalizeError,      setFinalizeError]      = useState<string | null>(null);
+  const [isFinalizing,       setIsFinalizing]       = useState(false);
   const [influenceOpen,      setInfluenceOpen]      = useState(false);
   const [personaPromptsOpen, setPersonaPromptsOpen] = useState(false);
+  const requestRef = useRef<AbortController | null>(null);
+
+  const cancelPromptRequest = () => {
+    requestRef.current?.abort();
+    requestRef.current = null;
+    setGenerating(false);
+    setIsRegenerating(false);
+    setApiError("Generation cancelled.");
+  };
+
+  const startPromptRequest = () => {
+    requestRef.current?.abort();
+    const controller = new AbortController();
+    requestRef.current = controller;
+    return controller;
+  };
 
   useEffect(() => {
     if (!projectId) return;
+    const controller = startPromptRequest();
     setGenerating(true);
     setApiError(null);
-    runPrompts(projectId)
+    runPrompts(projectId, false, controller.signal)
       .then(res => {
+        if (controller.signal.aborted) return;
         const mapped = mapApiToUiPrompts(res.prompts_rich);
         setPersonaPrompts(mapped);
         if (mapped.length > 0) setSelectedPersonaId(mapped[0].id);
         if (res.system_prompt) setSystemPrompt(mapApiToUiSystemPrompt(res.system_prompt));
       })
-      .catch(err => setApiError(err?.message ?? "Failed to load prompts. Make sure backend is running on http://localhost:8000"))
-      .finally(() => setGenerating(false));
+      .catch(err => {
+        if (!controller.signal.aborted) {
+          setApiError(err?.message ?? "Failed to load prompts.");
+        }
+      })
+      .finally(() => {
+        if (!controller.signal.aborted) {
+          setGenerating(false);
+          if (requestRef.current === controller) requestRef.current = null;
+        }
+      });
+    return () => controller.abort();
   }, [projectId]);
 
   const currentPersona = personaPrompts.find(p => p.id === selectedPersonaId) ?? personaPrompts[0];
@@ -392,17 +422,56 @@ const PrototypePage = () => {
 
   const handleRegenerate = () => {
     if (!projectId) return;
+    const controller = startPromptRequest();
     setIsRegenerating(true);
     setEditingSection(null);
-    runPrompts(projectId, true)
+    setApiError(null);
+    runPrompts(projectId, true, controller.signal)
       .then(res => {
+        if (controller.signal.aborted) return;
         const mapped = mapApiToUiPrompts(res.prompts_rich);
         setPersonaPrompts(mapped);
         if (mapped.length > 0) setSelectedPersonaId(mapped[0].id);
         if (res.system_prompt) setSystemPrompt(mapApiToUiSystemPrompt(res.system_prompt));
       })
-      .catch(err => setApiError(err?.message ?? "Regeneration failed"))
-      .finally(() => setIsRegenerating(false));
+      .catch(err => {
+        if (!controller.signal.aborted) {
+          setApiError(err?.message ?? "Regeneration failed");
+        }
+      })
+      .finally(() => {
+        if (!controller.signal.aborted) {
+          setIsRegenerating(false);
+          if (requestRef.current === controller) requestRef.current = null;
+        }
+      });
+  };
+
+  const handleProceed = async () => {
+    if (!projectId) {
+      navigate("/dashboard");
+      return;
+    }
+
+    try {
+      setIsFinalizing(true);
+      setFinalizeError(null);
+      await confirmPhaseReview(projectId, 3, {
+        nextPhase: 4,
+        summary: "Prototype prompts reviewed and approved for audit.",
+        metrics: {
+          persona_count: personaPrompts.length,
+          section_count: systemPrompt.sections.length,
+          total_screens: totalScreens,
+          system_quality: systemPrompt.quality,
+        },
+      });
+      navigate(`/project/${projectId}/phase/04`);
+    } catch (error) {
+      setFinalizeError(error instanceof Error ? error.message : "Unable to confirm this phase right now.");
+    } finally {
+      setIsFinalizing(false);
+    }
   };
 
   const updateSystemSection = (sectionId: string, content: string) => {
@@ -438,6 +507,9 @@ const PrototypePage = () => {
               <div key={i} className="h-1.5 w-1.5 rounded-full bg-accent/40 animate-bounce" style={{ animationDelay: `${i * 0.15}s` }} />
             ))}
           </div>
+          <Button variant="outline" size="sm" onClick={cancelPromptRequest} className="rounded-xl text-xs gap-1.5">
+            Cancel Generation
+          </Button>
         </div>
       </div>
     </SidebarProvider>
@@ -491,9 +563,10 @@ const PrototypePage = () => {
               </Button>
               <SystemExportMenu systemPrompt={systemPrompt} format={format} onCopy={handleCopySystem} size="sm" />
               <Button size="sm"
-                onClick={() => navigate(projectId ? `/project/${projectId}/phase/04` : "/dashboard")}
+                onClick={handleProceed}
+                disabled={isFinalizing}
                 className="h-8 rounded-lg text-xs gap-1.5 gradient-accent text-accent-foreground hover:brightness-110 shadow-soft">
-                Proceed to UX Audit
+                {isFinalizing ? "Confirming..." : "Proceed to UX Audit"}
                 <ArrowRight className="h-3.5 w-3.5" strokeWidth={1.5} />
               </Button>
             </div>
@@ -635,6 +708,9 @@ const PrototypePage = () => {
                         initial={{ opacity: 0 }} animate={{ opacity: 1 }} exit={{ opacity: 0 }}
                         className="flex flex-col items-center justify-center py-24 gap-4 text-muted-foreground">
                         <RefreshCw className="h-8 w-8 animate-spin" strokeWidth={1} />
+                        <Button variant="outline" size="sm" onClick={cancelPromptRequest} className="rounded-xl text-xs gap-1.5">
+                          Cancel Regeneration
+                        </Button>
                         <p className="text-sm">Rebuilding your product system…</p>
                       </motion.div>
                     ) : (
@@ -884,10 +960,11 @@ const PrototypePage = () => {
                   {stitchOpened ? "Prompt Copied!" : "Build Prototype"}
                 </Button>
                 <Button
-                  onClick={() => navigate(projectId ? `/project/${projectId}/phase/04` : "/dashboard")}
+                  onClick={handleProceed}
+                  disabled={isFinalizing}
                   className="h-10 rounded-xl text-sm gap-1.5 gradient-accent text-accent-foreground hover:brightness-110 shadow-soft"
                 >
-                  Proceed to UX Audit
+                  {isFinalizing ? "Confirming..." : "Proceed to UX Audit"}
                   <ArrowRight className="h-4 w-4" strokeWidth={1.5} />
                 </Button>
               </div>

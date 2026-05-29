@@ -1,8 +1,10 @@
 import { useState, useCallback, useEffect } from "react";
 import { useNavigate, useParams } from "react-router-dom";
 import { runPersonas, savePersonas, type RichPersona } from "@/lib/api";
+import { useApiCall } from "@/hooks/useApiCall";
 import { SidebarProvider, SidebarTrigger } from "@/components/ui/sidebar";
 import { AppSidebar } from "@/components/dashboard/AppSidebar";
+import { PhaseErrorState } from "@/components/PhaseErrorState";
 import { motion, AnimatePresence } from "framer-motion";
 import {
   ArrowLeft,
@@ -61,6 +63,7 @@ import {
   AlertDialogHeader,
   AlertDialogTitle,
 } from "@/components/ui/alert-dialog";
+import { getPhaseErrorDetails } from "@/lib/request-errors";
 
 // --- Types ---
 interface Persona {
@@ -114,6 +117,7 @@ interface Persona {
 }
 
 type SectionKey = "identity" | "goals" | "painPoints" | "behavior" | "psychographics" | "journey" | "businessValue" | "confidence";
+type PersonaExportFormat = "word" | "excel" | "pdf";
 
 // --- Stage Tracker (reused from intake) ---
 const STAGES = [
@@ -208,6 +212,261 @@ function mapUIToRich(p: Persona): RichPersona {
 }
 
 // (no static mock data — all personas come from the API)
+
+function escapeHtml(value: string) {
+  return value
+    .replaceAll("&", "&amp;")
+    .replaceAll("<", "&lt;")
+    .replaceAll(">", "&gt;")
+    .replaceAll('"', "&quot;")
+    .replaceAll("'", "&#39;");
+}
+
+function downloadBlob(content: BlobPart, filename: string, mime: string) {
+  const blob = new Blob([content], { type: mime });
+  const url = URL.createObjectURL(blob);
+  const link = document.createElement("a");
+  link.href = url;
+  link.download = filename;
+  document.body.appendChild(link);
+  link.click();
+  link.remove();
+  URL.revokeObjectURL(url);
+}
+
+function sanitizeFilenamePart(value: string) {
+  return value.replace(/[^a-z0-9_-]+/gi, "_").replace(/^_+|_+$/g, "") || "Aether";
+}
+
+function getPersonaExportBaseName(personas: Persona[]) {
+  const primaryName = personas.find((persona) => persona.tag === "Primary")?.name;
+  return `${sanitizeFilenamePart(primaryName || "Aether")}_Persona_Studio`;
+}
+
+function formatList(items: string[]) {
+  return items.length ? items.join(", ") : "None";
+}
+
+function buildPersonaWordMarkup(personas: Persona[]) {
+  const sections = personas
+    .map((persona) => `
+      <section style="margin-bottom:28pt;">
+        <h2 style="font-size:18pt;margin:0 0 8pt;">${escapeHtml(persona.name)} - ${escapeHtml(persona.archetype || persona.identity.role || "Persona")}</h2>
+        <p style="font-size:10pt;color:#64748b;margin:0 0 12pt;">
+          ${escapeHtml(persona.tag)} | ${escapeHtml(persona.status)} | Confidence ${persona.confidence}%
+        </p>
+        <table style="border-collapse:collapse;width:100%;margin-bottom:14pt;font-size:10pt;">
+          <tr><td style="padding:6pt;border:1pt solid #e5e7eb;font-weight:bold;width:140pt;">Role</td><td style="padding:6pt;border:1pt solid #e5e7eb;">${escapeHtml(persona.identity.role || "-")}</td></tr>
+          <tr><td style="padding:6pt;border:1pt solid #e5e7eb;font-weight:bold;">Context</td><td style="padding:6pt;border:1pt solid #e5e7eb;">${escapeHtml(persona.identity.context || "-")}</td></tr>
+          <tr><td style="padding:6pt;border:1pt solid #e5e7eb;font-weight:bold;">Access Level</td><td style="padding:6pt;border:1pt solid #e5e7eb;">${escapeHtml(persona.identity.accessLevel || "-")}</td></tr>
+          <tr><td style="padding:6pt;border:1pt solid #e5e7eb;font-weight:bold;">Device</td><td style="padding:6pt;border:1pt solid #e5e7eb;">${escapeHtml(persona.identity.device || "-")}</td></tr>
+          <tr><td style="padding:6pt;border:1pt solid #e5e7eb;font-weight:bold;">Priority Score</td><td style="padding:6pt;border:1pt solid #e5e7eb;">${persona.businessValue.priorityScore}</td></tr>
+        </table>
+        ${[
+          ["Primary goals", persona.goals.primary],
+          ["Secondary goals", persona.goals.secondary],
+          ["Emotional goals", persona.goals.emotional],
+          ["Functional pain points", persona.painPoints.functional],
+          ["Emotional pain points", persona.painPoints.emotional],
+          ["System gaps", persona.painPoints.systemGaps],
+          ["Behavior triggers", persona.behavior.triggers],
+          ["Traits", persona.psychographics.traits],
+          ["Trust factors", persona.psychographics.trustFactors],
+          ["Values", persona.psychographics.values],
+          ["Key actions", persona.journey.keyActions],
+          ["Drop-off risks", persona.journey.dropOffRisks],
+          ["Missing data", persona.missingData],
+          ["AI recommendations", persona.aiRecommendations],
+        ]
+          .map(([label, items]) => `
+            <h3 style="font-size:12pt;margin:12pt 0 6pt;">${escapeHtml(label)}</h3>
+            <p style="font-size:10pt;margin:0 0 6pt;line-height:1.5;">${escapeHtml(formatList(items as string[]))}</p>
+          `)
+          .join("")}
+        <h3 style="font-size:12pt;margin:12pt 0 6pt;">Behavior profile</h3>
+        <p style="font-size:10pt;margin:0 0 6pt;line-height:1.5;">
+          Frequency: ${escapeHtml(persona.behavior.frequency || "-")}<br />
+          Tech proficiency: ${escapeHtml(persona.behavior.techProficiency || "-")}<br />
+          Decision style: ${escapeHtml(persona.behavior.decisionStyle || "-")}
+        </p>
+        <h3 style="font-size:12pt;margin:12pt 0 6pt;">Journey summary</h3>
+        <p style="font-size:10pt;margin:0;line-height:1.5;">
+          Entry point: ${escapeHtml(persona.journey.entryPoint || "-")}<br />
+          Success definition: ${escapeHtml(persona.journey.successDefinition || "-")}<br />
+          Revenue impact: ${escapeHtml(persona.businessValue.revenueImpact || "-")}<br />
+          Retention importance: ${escapeHtml(persona.businessValue.retentionImportance || "-")}<br />
+          Risk tolerance: ${escapeHtml(persona.psychographics.riskTolerance || "-")}
+        </p>
+      </section>
+    `)
+    .join("");
+
+  return `<!DOCTYPE html>
+<html xmlns:w="urn:schemas-microsoft-com:office:word">
+  <head>
+    <meta charset="UTF-8" />
+    <title>Aether Persona Studio Export</title>
+  </head>
+  <body style="font-family:Calibri,Arial,sans-serif;color:#0f172a;margin:48pt;">
+    <h1 style="font-size:24pt;margin:0 0 8pt;">Aether Persona Studio</h1>
+    <p style="color:#64748b;font-size:11pt;margin:0 0 24pt;">Generated ${new Date().toLocaleString()}</p>
+    ${sections}
+  </body>
+</html>`;
+}
+
+function toCsvCell(value: string | number) {
+  const stringValue = String(value ?? "");
+  return `"${stringValue.replaceAll('"', '""')}"`;
+}
+
+function exportPersonasToExcel(personas: Persona[]) {
+  const header = [
+    "Name",
+    "Tag",
+    "Status",
+    "Confidence",
+    "Archetype",
+    "Role",
+    "Context",
+    "Access Level",
+    "Device",
+    "Primary Goals",
+    "Secondary Goals",
+    "Emotional Goals",
+    "Functional Pain Points",
+    "Emotional Pain Points",
+    "System Gaps",
+    "Behavior Frequency",
+    "Tech Proficiency",
+    "Decision Style",
+    "Triggers",
+    "Traits",
+    "Risk Tolerance",
+    "Trust Factors",
+    "Values",
+    "Entry Point",
+    "Key Actions",
+    "Drop-off Risks",
+    "Success Definition",
+    "Revenue Impact",
+    "Retention Importance",
+    "Priority Score",
+    "Missing Data",
+    "AI Recommendations",
+  ];
+
+  const rows = personas.map((persona) => [
+    persona.name,
+    persona.tag,
+    persona.status,
+    persona.confidence,
+    persona.archetype,
+    persona.identity.role,
+    persona.identity.context,
+    persona.identity.accessLevel,
+    persona.identity.device,
+    formatList(persona.goals.primary),
+    formatList(persona.goals.secondary),
+    formatList(persona.goals.emotional),
+    formatList(persona.painPoints.functional),
+    formatList(persona.painPoints.emotional),
+    formatList(persona.painPoints.systemGaps),
+    persona.behavior.frequency,
+    persona.behavior.techProficiency,
+    persona.behavior.decisionStyle,
+    formatList(persona.behavior.triggers),
+    formatList(persona.psychographics.traits),
+    persona.psychographics.riskTolerance,
+    formatList(persona.psychographics.trustFactors),
+    formatList(persona.psychographics.values),
+    persona.journey.entryPoint,
+    formatList(persona.journey.keyActions),
+    formatList(persona.journey.dropOffRisks),
+    persona.journey.successDefinition,
+    persona.businessValue.revenueImpact,
+    persona.businessValue.retentionImportance,
+    persona.businessValue.priorityScore,
+    formatList(persona.missingData),
+    formatList(persona.aiRecommendations),
+  ]);
+
+  const csv = [header, ...rows]
+    .map((row) => row.map(toCsvCell).join(","))
+    .join("\r\n");
+
+  downloadBlob(`\uFEFF${csv}`, `${getPersonaExportBaseName(personas)}.csv`, "text/csv;charset=utf-8;");
+}
+
+function exportPersonasToWord(personas: Persona[]) {
+  downloadBlob(buildPersonaWordMarkup(personas), `${getPersonaExportBaseName(personas)}.doc`, "application/msword");
+}
+
+function exportPersonasToPdf(personas: Persona[]) {
+  const printWindow = window.open("", "_blank", "noopener,noreferrer");
+  if (!printWindow) return;
+
+  printWindow.document.write(`
+    <!DOCTYPE html>
+    <html>
+      <head>
+        <meta charset="UTF-8" />
+        <title>Aether Persona Studio PDF</title>
+        <style>
+          body { font-family: Inter, Arial, sans-serif; color: #0f172a; margin: 32px auto; max-width: 900px; padding: 0 24px; }
+          h1 { font-size: 28px; margin-bottom: 6px; }
+          h2 { font-size: 20px; margin: 24px 0 8px; }
+          h3 { font-size: 13px; margin: 16px 0 6px; text-transform: uppercase; letter-spacing: 0.04em; color: #64748b; }
+          p, li { font-size: 12px; line-height: 1.6; }
+          .meta { color: #64748b; margin-bottom: 20px; }
+          .card { border: 1px solid #e5e7eb; border-radius: 14px; padding: 18px; margin-bottom: 16px; break-inside: avoid; }
+          .grid { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 12px; }
+          .pill { display: inline-block; margin-right: 8px; padding: 4px 8px; border-radius: 999px; background: #eef2ff; color: #4f46e5; font-size: 11px; }
+          ul { margin: 0; padding-left: 18px; }
+        </style>
+      </head>
+      <body>
+        <h1>Aether Persona Studio</h1>
+        <p class="meta">Generated ${escapeHtml(new Date().toLocaleString())}</p>
+        ${personas
+          .map((persona) => `
+            <section class="card">
+              <h2>${escapeHtml(persona.name)}</h2>
+              <div class="meta">
+                <span class="pill">${escapeHtml(persona.tag)}</span>
+                <span class="pill">${escapeHtml(persona.status)}</span>
+                <span class="pill">Confidence ${persona.confidence}%</span>
+              </div>
+              <div class="grid">
+                <p><strong>Role:</strong> ${escapeHtml(persona.identity.role || "-")}</p>
+                <p><strong>Device:</strong> ${escapeHtml(persona.identity.device || "-")}</p>
+                <p><strong>Access:</strong> ${escapeHtml(persona.identity.accessLevel || "-")}</p>
+                <p><strong>Priority score:</strong> ${persona.businessValue.priorityScore}</p>
+              </div>
+              <h3>Context</h3>
+              <p>${escapeHtml(persona.identity.context || "-")}</p>
+              <h3>Goals</h3>
+              <ul>${persona.goals.primary.map((goal) => `<li>${escapeHtml(goal)}</li>`).join("") || "<li>None</li>"}</ul>
+              <h3>Pain points</h3>
+              <ul>${persona.painPoints.functional.map((point) => `<li>${escapeHtml(point)}</li>`).join("") || "<li>None</li>"}</ul>
+              <h3>Journey</h3>
+              <p><strong>Entry:</strong> ${escapeHtml(persona.journey.entryPoint || "-")}</p>
+              <p><strong>Success:</strong> ${escapeHtml(persona.journey.successDefinition || "-")}</p>
+              <h3>Recommendations</h3>
+              <ul>${persona.aiRecommendations.map((item) => `<li>${escapeHtml(item)}</li>`).join("") || "<li>None</li>"}</ul>
+            </section>
+          `)
+          .join("")}
+        <script>
+          window.onload = function () {
+            window.print();
+          };
+        </script>
+      </body>
+    </html>
+  `);
+  printWindow.document.close();
+}
 
 // --- AI Insight Item ---
 function InsightItem({ icon: Icon, label, type }: { icon: React.ElementType; label: string; type: "warning" | "suggestion" | "info" }) {
@@ -406,24 +665,19 @@ const PersonaStudio = () => {
   const [openSections, setOpenSections] = useState<Set<SectionKey>>(new Set(["identity", "goals"]));
   const [deleteDialogId, setDeleteDialogId] = useState<string | null>(null);
   const [showConfirmDialog, setShowConfirmDialog] = useState(false);
-  const [generating, setGenerating] = useState(true);
-  const [apiError, setApiError] = useState<string | null>(null);
+  const { run: runApiCall, cancel: cancelApiCall, loading: apiLoading, error: apiError } =
+    useApiCall<{ personas_rich: RichPersona[]; cached: boolean }>({ initialLoading: true });
 
   useEffect(() => {
     if (!projectId) return;
-    setGenerating(true);
-    setApiError(null);
-    runPersonas(projectId)
-      .then(({ personas_rich }) => {
+    runApiCall(signal => runPersonas(projectId, false, signal), {
+      onSuccess: ({ personas_rich }) => {
         const mapped = personas_rich.map(mapRichToUI);
         setPersonas(mapped);
         if (mapped.length > 0) setSelectedId(mapped[0].id);
-      })
-      .catch((err) => {
-        setApiError(err?.message ?? "Failed to generate personas. Make sure the backend is running on http://localhost:8000");
-      })
-      .finally(() => setGenerating(false));
-  }, [projectId]);
+      },
+    });
+  }, [projectId, runApiCall]);
 
   const selected = personas.find((p) => p.id === selectedId) || personas[0];
 
@@ -485,16 +739,29 @@ const PersonaStudio = () => {
 
   const handleRegenerate = () => {
     if (!projectId) return;
-    setGenerating(true);
-    setApiError(null);
-    runPersonas(projectId, true)
-      .then(({ personas_rich }) => {
+    runApiCall(signal => runPersonas(projectId, true, signal), {
+      onSuccess: ({ personas_rich }) => {
         const mapped = personas_rich.map(mapRichToUI);
         setPersonas(mapped);
         if (mapped.length > 0) setSelectedId(mapped[0].id);
-      })
-      .catch((err) => setApiError(err?.message ?? "Regeneration failed"))
-      .finally(() => setGenerating(false));
+      },
+    });
+  };
+
+  const handleExport = (format: PersonaExportFormat) => {
+    if (personas.length === 0) return;
+
+    if (format === "word") {
+      exportPersonasToWord(personas);
+      return;
+    }
+
+    if (format === "excel") {
+      exportPersonasToExcel(personas);
+      return;
+    }
+
+    exportPersonasToPdf(personas);
   };
 
   const allConfirmed = personas.every((p) => p.status === "confirmed");
@@ -522,7 +789,7 @@ const PersonaStudio = () => {
     : 0;
 
   // ── Loading / Error screens ───────────────────────────────────────────────
-  if (generating) {
+  if (apiLoading) {
     return (
       <SidebarProvider>
         <div className="min-h-screen flex w-full bg-background">
@@ -540,6 +807,9 @@ const PersonaStudio = () => {
                 <div key={i} className="h-1.5 w-1.5 rounded-full bg-accent/40 animate-bounce" style={{ animationDelay: `${i * 0.15}s` }} />
               ))}
             </div>
+            <Button variant="ghost" size="sm" className="text-xs text-muted-foreground mt-1" onClick={cancelApiCall}>
+              Cancel
+            </Button>
           </div>
         </div>
       </SidebarProvider>
@@ -551,23 +821,7 @@ const PersonaStudio = () => {
       <SidebarProvider>
         <div className="min-h-screen flex w-full bg-background">
           <AppSidebar />
-          <div className="flex-1 flex flex-col items-center justify-center gap-4 max-w-md mx-auto text-center px-6">
-            <div className="h-10 w-10 rounded-xl bg-destructive/10 flex items-center justify-center">
-              <AlertTriangle className="h-5 w-5 text-destructive" strokeWidth={1.5} />
-            </div>
-            <div>
-              <p className="text-sm font-medium text-foreground">Persona generation failed</p>
-              <p className="text-xs text-muted-foreground mt-1 leading-relaxed">{apiError}</p>
-            </div>
-            <Button
-              size="sm"
-              className="rounded-xl gradient-accent text-accent-foreground text-xs gap-1.5"
-              onClick={handleRegenerate}
-            >
-              <RefreshCw className="h-3.5 w-3.5" strokeWidth={1.5} />
-              Retry
-            </Button>
-          </div>
+          <PhaseErrorState details={getPhaseErrorDetails("Persona generation", apiError)} onRetry={handleRegenerate} />
         </div>
       </SidebarProvider>
     );
@@ -612,15 +866,15 @@ const PersonaStudio = () => {
             {/* Export */}
             <DropdownMenu>
               <DropdownMenuTrigger asChild>
-                <Button variant="outline" size="sm" className="rounded-xl h-8 text-xs gap-1.5">
+                <Button variant="outline" size="sm" className="rounded-xl h-8 text-xs gap-1.5" disabled={personas.length === 0}>
                   <Download className="h-3.5 w-3.5" strokeWidth={1.5} />
                   Export
                 </Button>
               </DropdownMenuTrigger>
               <DropdownMenuContent align="end" className="rounded-xl">
-                <DropdownMenuItem className="text-xs">Word (.docx)</DropdownMenuItem>
-                <DropdownMenuItem className="text-xs">Excel (.xlsx)</DropdownMenuItem>
-                <DropdownMenuItem className="text-xs">PDF (.pdf)</DropdownMenuItem>
+                <DropdownMenuItem className="text-xs" onClick={() => handleExport("word")}>Word (.doc)</DropdownMenuItem>
+                <DropdownMenuItem className="text-xs" onClick={() => handleExport("excel")}>Excel (.csv)</DropdownMenuItem>
+                <DropdownMenuItem className="text-xs" onClick={() => handleExport("pdf")}>PDF (.pdf)</DropdownMenuItem>
               </DropdownMenuContent>
             </DropdownMenu>
 

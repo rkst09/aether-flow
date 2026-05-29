@@ -1,6 +1,6 @@
 import { useState, useRef, useEffect } from "react";
 import { useNavigate, useParams } from "react-router-dom";
-import { runAudit, type RichScreenAudit } from "@/lib/api";
+import { confirmPhaseReview, runAudit, type RichScreenAudit } from "@/lib/api";
 import { motion, AnimatePresence } from "framer-motion";
 import {
   ArrowLeft, ArrowRight, ChevronDown, ChevronRight,
@@ -480,8 +480,48 @@ const UXAudit = () => {
   const [typeFilter,  setTypeFilter]  = useState<TypeFilter>("all");
   const [auditData,   setAuditData]   = useState<ScreenAudit[]>([]);
   const [apiError,    setApiError]    = useState<string | null>(null);
+  const [finalizeError, setFinalizeError] = useState<string | null>(null);
+  const [isFinalizing, setIsFinalizing] = useState(false);
+  const requestRef = useRef<AbortController | null>(null);
 
   const hasInput = files.length > 0;
+
+  useEffect(() => {
+    return () => {
+      Object.values(previews).forEach(URL.revokeObjectURL);
+    };
+  }, [previews]);
+
+  useEffect(() => {
+    if (!routeProjectId) return;
+    const controller = new AbortController();
+    requestRef.current = controller;
+    setAuditPhase("running");
+    setApiError(null);
+    runAudit(routeProjectId, [], "", "", false, controller.signal)
+      .then(res => {
+        if (controller.signal.aborted) return;
+        if (res.audit_rich?.length) {
+          setAuditData(res.audit_rich as ScreenAudit[]);
+          setAuditPhase("results");
+          return;
+        }
+        setAuditPhase("setup");
+      })
+      .catch(() => {
+        if (!controller.signal.aborted) {
+          setAuditPhase("setup");
+        }
+      });
+    return () => controller.abort();
+  }, [routeProjectId]);
+
+  const cancelAuditRun = () => {
+    requestRef.current?.abort();
+    requestRef.current = null;
+    setAuditPhase(auditData.length ? "results" : "setup");
+    setApiError("Audit cancelled.");
+  };
 
   const handleRunAudit = () => {
     if (!hasInput) return;
@@ -492,17 +532,56 @@ const UXAudit = () => {
       previewMap[name] = URL.createObjectURL(f);
     });
     setPreviews(prev => { Object.values(prev).forEach(u => URL.revokeObjectURL(u)); return previewMap; });
+    const controller = new AbortController();
+    requestRef.current?.abort();
+    requestRef.current = controller;
     setAuditPhase("running");
     setApiError(null);
-    runAudit(routeProjectId ?? "", files, "", contextValue)
-      .then(res => { setAuditData(res.audit_rich as ScreenAudit[]); setAuditPhase("results"); })
-      .catch(err => { setApiError(err?.message ?? "Audit failed. Make sure backend is running on http://localhost:8000"); setAuditPhase("setup"); });
+    runAudit(routeProjectId ?? "", files, "", contextValue, false, controller.signal)
+      .then(res => {
+        if (controller.signal.aborted) return;
+        setAuditData(res.audit_rich as ScreenAudit[]);
+        setAuditPhase("results");
+      })
+      .catch(err => {
+        if (!controller.signal.aborted) {
+          setApiError(err?.message ?? "Audit failed.");
+          setAuditPhase("setup");
+        }
+      });
   };
 
   const allIssues   = getAllIssues(auditData);
   const highCount   = allIssues.filter(i => i.severity === "High").length;
   const avgScore    = auditData.length ? Math.round(auditData.reduce((a, s) => a + s.score, 0) / auditData.length) : 0;
   const worstScreen = auditData.length ? auditData.reduce((a, b) => a.score < b.score ? a : b) : null;
+
+  const handleProceed = async () => {
+    if (!routeProjectId) {
+      navigate("/dashboard");
+      return;
+    }
+
+    try {
+      setIsFinalizing(true);
+      setFinalizeError(null);
+      await confirmPhaseReview(routeProjectId, 4, {
+        nextPhase: 5,
+        summary: "UX audit reviewed and approved for copywriting.",
+        metrics: {
+          screen_count: auditData.length,
+          issue_count: allIssues.length,
+          high_severity_count: highCount,
+          average_score: avgScore,
+        },
+      });
+      navigate(`/project/${routeProjectId}/phase/05`, { state: { files } });
+    } catch (error) {
+      setFinalizeError(error instanceof Error ? error.message : "Unable to confirm the audit right now.");
+    } finally {
+      setIsFinalizing(false);
+    }
+  };
 
 
   return (
@@ -569,13 +648,19 @@ const UXAudit = () => {
                   Analyze My Screens
                 </Button>
               )}
+              {auditPhase === "running" && (
+                <Button variant="outline" size="sm" onClick={cancelAuditRun} className="h-8 rounded-lg text-xs gap-1.5">
+                  Cancel Audit
+                </Button>
+              )}
               {auditPhase === "results" && (
                 <Button
                   size="sm"
-                  onClick={() => navigate(routeProjectId ? `/project/${routeProjectId}/phase/05` : "/dashboard", { state: { files } })}
+                  onClick={handleProceed}
+                  disabled={isFinalizing}
                   className="h-8 rounded-lg text-xs gap-1.5 gradient-accent text-accent-foreground hover:brightness-110 shadow-soft"
                 >
-                  Proceed to UX Copy
+                  {isFinalizing ? "Confirming..." : "Proceed to UX Copy"}
                   <ArrowRight className="h-3.5 w-3.5" strokeWidth={1.5} />
                 </Button>
               )}
@@ -668,16 +753,19 @@ const UXAudit = () => {
                       <p className="text-sm font-semibold text-foreground">Analysing experience…</p>
                       <p className="text-xs text-muted-foreground">Evaluating usability, cognitive load, interactions, and system gaps</p>
                     </div>
-                    <div className="flex items-center gap-1.5">
-                      {["Usability","Cognitive","Interaction","Emotional","System"].map((label, i) => (
-                        <motion.span key={label} initial={{ opacity: 0 }} animate={{ opacity: 1 }} transition={{ delay: i * 0.3 }}
-                          className="text-[10px] bg-secondary text-muted-foreground rounded-full px-2 py-0.5">
-                          {label}
-                        </motion.span>
-                      ))}
-                    </div>
-                  </motion.div>
-                )}
+                      <div className="flex items-center gap-1.5">
+                        {["Usability","Cognitive","Interaction","Emotional","System"].map((label, i) => (
+                          <motion.span key={label} initial={{ opacity: 0 }} animate={{ opacity: 1 }} transition={{ delay: i * 0.3 }}
+                            className="text-[10px] bg-secondary text-muted-foreground rounded-full px-2 py-0.5">
+                            {label}
+                          </motion.span>
+                        ))}
+                      </div>
+                      <Button variant="outline" size="sm" onClick={cancelAuditRun} className="rounded-xl text-xs gap-1.5">
+                        Cancel Audit
+                      </Button>
+                    </motion.div>
+                  )}
 
                 {auditPhase === "results" && (
                   <motion.div key="results" initial={{ opacity: 0, y: 4 }} animate={{ opacity: 1, y: 0 }} transition={{ duration: 0.15 }}>
@@ -785,10 +873,11 @@ const UXAudit = () => {
                   <p className="text-sm font-medium text-foreground">
                     {allIssues.length} issues · {highCount} critical · avg score {avgScore}/100
                   </p>
-                  <p className="text-xs text-muted-foreground">
-                    Audit ready for export and team review
-                  </p>
-                </div>
+	                  <p className="text-xs text-muted-foreground">
+	                    Audit ready for export and team review
+	                  </p>
+	                  {finalizeError ? <p className="text-xs text-destructive">{finalizeError}</p> : null}
+	                </div>
                 <div className="flex items-center gap-2">
                   <DropdownMenu>
                     <DropdownMenuTrigger asChild>
@@ -810,13 +899,14 @@ const UXAudit = () => {
                       </DropdownMenuItem>
                     </DropdownMenuContent>
                   </DropdownMenu>
-                  <Button
-                    onClick={() => navigate(routeProjectId ? `/project/${routeProjectId}/phase/05` : "/dashboard", { state: { files } })}
-                    className="h-10 rounded-xl text-sm gap-1.5 gradient-accent text-accent-foreground hover:brightness-110 shadow-soft"
-                  >
-                    Proceed to UX Copywriting
-                    <ArrowRight className="h-4 w-4" strokeWidth={1.5} />
-                  </Button>
+	                  <Button
+	                    onClick={handleProceed}
+	                    disabled={isFinalizing}
+	                    className="h-10 rounded-xl text-sm gap-1.5 gradient-accent text-accent-foreground hover:brightness-110 shadow-soft"
+	                  >
+	                    {isFinalizing ? "Confirming..." : "Proceed to UX Copywriting"}
+	                    <ArrowRight className="h-4 w-4" strokeWidth={1.5} />
+	                  </Button>
                 </div>
               </div>
             </div>

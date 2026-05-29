@@ -1,6 +1,9 @@
 import { useState, useMemo, useEffect } from "react";
 import { useNavigate, useParams } from "react-router-dom";
-import { runScreens, type RichScreenModule } from "@/lib/api";
+import { runScreens, type RichJourneyMap, type RichPersona, type RichScreenModule } from "@/lib/api";
+import { useApiCall } from "@/hooks/useApiCall";
+import { supabase } from "@/lib/supabase";
+import { PhaseErrorState } from "@/components/PhaseErrorState";
 import { motion, AnimatePresence } from "framer-motion";
 import {
   ArrowRight, ArrowLeft, ChevronDown, ChevronRight,
@@ -19,6 +22,13 @@ import {
 } from "@/components/ui/dropdown-menu";
 import { AppSidebar } from "@/components/dashboard/AppSidebar";
 import { SidebarProvider, SidebarTrigger } from "@/components/ui/sidebar";
+import {
+  computeStageCoverage,
+  derivePersonaCatalog,
+  deriveRelationFlowLanes,
+  type RelationLane,
+} from "@/lib/pipeline-insights";
+import { getPhaseErrorDetails } from "@/lib/request-errors";
 
 // ─── Types ───────────────────────────────────────────────────────────────────
 
@@ -54,7 +64,7 @@ interface ScreenModule {
 
 // ─── Constants ───────────────────────────────────────────────────────────────
 
-const PERSONAS = [
+let PERSONAS = [
   { id: "p1", name: "Sarah Chen",   initials: "SC", color: "bg-violet-500", tag: "Primary"   },
   { id: "p2", name: "Alex Rivera",  initials: "AR", color: "bg-blue-500",   tag: "Primary"   },
   { id: "p3", name: "Jordan Patel", initials: "JP", color: "bg-amber-500",  tag: "Secondary" },
@@ -71,7 +81,7 @@ const JOURNEY_STAGE_COLORS: Record<string, string> = {
 };
 
 
-const FLOW_LANES = [
+let FLOW_LANES: RelationLane[] = [
   {
     id: "auth",     label: "Authentication",          labelColor: "text-violet-600 dark:text-violet-400",
     nodeColor: "border-violet-200 dark:border-violet-800 bg-violet-50 dark:bg-violet-950/30",
@@ -808,28 +818,65 @@ function SharedExclusiveTab({ modules }: { modules: ScreenModule[] }) {
 // ─── Export Utilities ─────────────────────────────────────────────────────────
 
 function exportToExcel(modules: ScreenModule[], projectName: string) {
-  const header = ["Module","Screen","Type","Complexity","Shared","Personas","Journey Stage","Backlog Ref","States","Purpose","Entry Points","Exit Points","Component Hints"];
-  const rows: string[][] = [header];
-  for (const mod of modules) {
-    for (const s of mod.screens) {
-      const personas = s.personas.join("; ");
+  const q = (s: string) => `"${String(s ?? "").replace(/"/g, '""')}"`;
+  const today = new Date().toLocaleDateString("en-GB", { day: "2-digit", month: "long", year: "numeric" });
+  const totalScreens = modules.reduce((n, m) => n + m.screens.length, 0);
+  const COLS = 13;
+  const blank = () => Array(COLS).fill(q(""));
+
+  const rows: string[][] = [];
+
+  // ── Title block ──
+  rows.push([q("AETHER — SCREEN LIST"), ...Array(COLS - 1).fill(q(""))]);
+  rows.push([q(`Project: ${projectName}`), ...Array(COLS - 1).fill(q(""))]);
+  rows.push([q(`Date: ${today}`), ...Array(COLS - 1).fill(q(""))]);
+  rows.push([q(`Total Screens: ${totalScreens}   |   Sections: ${modules.length}`), ...Array(COLS - 1).fill(q(""))]);
+  rows.push(blank());
+
+  // ── Legend ──
+  rows.push([q("HOW TO READ THIS FILE"), ...Array(COLS - 1).fill(q(""))]);
+  rows.push([q("Screen Type  →  Action = User does something  |  Detail = User reads or reviews info  |  System = Runs automatically  |  Feedback = User gives input  |  Entry = Starting point"), ...Array(COLS - 1).fill(q(""))]);
+  rows.push([q("Complexity   →  Simple = Easy to build  |  Medium = Moderate work  |  Complex = Needs careful design"), ...Array(COLS - 1).fill(q(""))]);
+  rows.push([q("Who Sees It  →  Shared = Every user sees this screen  |  Exclusive = Only specific users see this screen"), ...Array(COLS - 1).fill(q(""))]);
+  rows.push(blank());
+  rows.push(blank());
+
+  let num = 0;
+  modules.forEach((mod, i) => {
+    rows.push([q(`SECTION ${i + 1} OF ${modules.length}: ${mod.name.toUpperCase()}`), ...Array(COLS - 1).fill(q(""))]);
+    rows.push([q(`${mod.screens.length} screen${mod.screens.length !== 1 ? "s" : ""} in this section`), ...Array(COLS - 1).fill(q(""))]);
+    rows.push(blank());
+    rows.push([
+      q("#"), q("Screen Name"), q("What This Screen Does"),
+      q("Screen Type"), q("How Complex"), q("Who Sees It"),
+      q("Target Users"), q("Step in Journey"), q("Feature It Belongs To"),
+      q("Screen States"), q("How You Get Here"), q("Where You Go Next"), q("UI Elements"),
+    ]);
+    mod.screens.forEach(s => {
+      num++;
       rows.push([
-        mod.name, s.name, s.type, s.complexity,
-        s.shared ? "Shared" : "Exclusive",
-        personas, s.journeyStage, s.backlogRef,
-        s.states.join("; "), s.purpose,
-        s.entryPoints.join("; "), s.exitPoints.join("; "),
-        s.componentHints.join("; "),
+        q(String(num)), q(s.name), q(s.purpose),
+        q(s.type), q(s.complexity),
+        q(s.shared ? "Shared — All Users" : "Exclusive — Specific Users"),
+        q(s.personas.join(", ")), q(s.journeyStage), q(s.backlogRef),
+        q(s.states.join(" → ")),
+        q(s.entryPoints.join(", ")), q(s.exitPoints.join(", ")),
+        q(s.componentHints.join(", ")),
       ]);
-    }
-  }
-  const csv = "\uFEFF" + rows.map(r => r.map(v => `"${String(v ?? "").replace(/"/g, '""')}"`).join(",")).join("\r\n");
+    });
+    rows.push(blank());
+    rows.push(blank());
+  });
+
+  const csv = "\uFEFF" + rows.map(r => r.join(",")).join("\r\n");
   const blob = new Blob([csv], { type: "text/csv;charset=utf-8;" });
   const url  = URL.createObjectURL(blob);
   const a    = document.createElement("a");
   a.href     = url;
   a.download = `${projectName.replace(/\s+/g, "_")}_Screen_List.csv`;
+  document.body.appendChild(a);
   a.click();
+  document.body.removeChild(a);
   URL.revokeObjectURL(url);
 }
 
@@ -865,38 +912,49 @@ function exportMapToWord() {
 
 function exportMapToPDF() {
   const laneRows = FLOW_LANES.map(lane =>
-    `<tr><td>${lane.label}</td><td>${lane.nodes.map(n => n.name).join(" → ")}</td></tr>`
+    `<tr>
+      <td style="font-weight:600;padding:10px 14px;white-space:nowrap;vertical-align:top;color:#374151;width:220px;border-bottom:1px solid #f3f4f6;">${lane.label}</td>
+      <td style="padding:10px 14px;color:#4b5563;line-height:1.7;border-bottom:1px solid #f3f4f6;">${lane.nodes.map(n => n.name).join(" → ")}</td>
+    </tr>`
   ).join("");
 
-  const win = window.open("", "_blank");
-  if (!win) return;
-  win.document.write(`<!DOCTYPE html><html><head><meta charset="utf-8"/>
+  const html = `<!DOCTYPE html><html><head><meta charset="utf-8"/>
     <title>Aether — Screen Navigation Flow</title>
     <style>
       *{margin:0;padding:0;box-sizing:border-box}
-      body{font-family:-apple-system,Segoe UI,Arial,sans-serif;padding:40px;color:#111;font-size:12px}
-      h1{font-size:18px;margin-bottom:4px}
-      .sub{color:#6b7280;margin-bottom:24px;font-size:12px}
-      table{width:100%;border-collapse:collapse}
-      th{text-align:left;padding:8px 12px;background:#f9fafb;border-bottom:2px solid #e5e7eb;font-size:11px;text-transform:uppercase;letter-spacing:.05em;color:#6b7280}
-      td{padding:10px 12px;border-bottom:1px solid #f3f4f6;vertical-align:top}
-      td:first-child{font-weight:600;white-space:nowrap;width:220px;color:#374151}
-      td:last-child{color:#4b5563;line-height:1.6}
+      body{font-family:-apple-system,BlinkMacSystemFont,'Segoe UI',Arial,sans-serif;padding:48px;color:#111;font-size:13px;background:#fff}
+      h1{font-size:20px;font-weight:700;margin-bottom:4px;color:#0f172a}
+      .sub{color:#6b7280;margin-bottom:28px;font-size:12px}
+      table{width:100%;border-collapse:collapse;border:1px solid #e5e7eb;border-radius:8px;overflow:hidden}
+      thead tr{background:#f9fafb}
+      th{text-align:left;padding:10px 14px;font-size:11px;text-transform:uppercase;letter-spacing:.06em;color:#6b7280;border-bottom:2px solid #e5e7eb}
+      tr:last-child td{border-bottom:none}
       .note{font-size:11px;color:#9ca3af;margin-top:20px}
-      @media print{body{padding:20px}}
+      @media print{body{padding:20px}button{display:none}}
     </style>
   </head><body>
     <h1>Screen Navigation Flow</h1>
-    <p class="sub">Primary user paths — read top to bottom · Aether Platform</p>
+    <p class="sub">Primary user paths — read top to bottom &nbsp;·&nbsp; ${new Date().toLocaleDateString("en-GB", { day: "2-digit", month: "long", year: "numeric" })}</p>
     <table>
-      <thead><tr><th>Phase / Lane</th><th>Screens (sequential)</th></tr></thead>
+      <thead><tr><th style="width:220px">Phase / Lane</th><th>Screens in order (left to right = first to last)</th></tr></thead>
       <tbody>${laneRows}</tbody>
     </table>
-    <p class="note">Platform tools are sidebar-accessible at any point without breaking phase progression.</p>
-  </body></html>`);
-  win.document.close();
-  win.focus();
-  setTimeout(() => { win.print(); }, 300);
+    <p class="note">To save as PDF: use File → Print → Save as PDF in your browser.</p>
+  </body></html>`;
+
+  const blob = new Blob([html], { type: "text/html;charset=utf-8;" });
+  const url  = URL.createObjectURL(blob);
+  const win  = window.open(url, "_blank");
+  if (!win) {
+    // fallback: download as HTML file if popup blocked
+    const a = document.createElement("a");
+    a.href = url;
+    a.download = "Aether_Screen_Navigation_Flow.html";
+    document.body.appendChild(a);
+    a.click();
+    document.body.removeChild(a);
+  }
+  setTimeout(() => URL.revokeObjectURL(url), 30000);
 }
 
 // ─── Main Page ────────────────────────────────────────────────────────────────
@@ -945,37 +1003,90 @@ const ScreenDerivation = () => {
   const navigate = useNavigate();
   const { id: projectId } = useParams<{ id: string }>();
   const [modules,     setModules]     = useState<ScreenModule[]>([]);
-  const [generating, setGenerating] = useState(true);
-  const [apiError,    setApiError]    = useState<string | null>(null);
-
-  useEffect(() => {
-    if (!projectId) return;
-    setGenerating(true);
-    setApiError(null);
-    runScreens(projectId)
-      .then(res => setModules(mapApiToUiScreenModules(res.screens_rich)))
-      .catch(err => setApiError(err?.message ?? "Failed to load screens. Make sure backend is running on http://localhost:8000"))
-      .finally(() => setGenerating(false));
-  }, [projectId]);
+  const [personasRich, setPersonasRich] = useState<RichPersona[]>([]);
+  const [journeysRich, setJourneysRich] = useState<RichJourneyMap[]>([]);
+  const { run: runApiCall, cancel: cancelApiCall, loading: apiLoading, error: apiError } = useApiCall({ initialLoading: true });
   const [projectName, setProjectName] = useState("Aether Platform");
   const [activeTab,   setActiveTab]   = useState("list");
   const [listFilter,  setListFilter]  = useState<"all" | "shared" | "exclusive">("all");
 
+  useEffect(() => {
+    if (!projectId) return;
+    runApiCall(signal => Promise.all([
+      runScreens(projectId, false, signal),
+      supabase.from("projects").select("name").eq("id", projectId).single(),
+      supabase
+        .from("agent_runs")
+        .select("output_json, created_at")
+        .eq("project_id", projectId)
+        .eq("phase", 1)
+        .eq("status", "completed")
+        .order("created_at", { ascending: false }),
+    ]), {
+      onSuccess: ([screenRes, projectRes, phaseOneRes]) => {
+        const uiModules = mapApiToUiScreenModules(screenRes.screens_rich);
+        const phaseOneRuns = phaseOneRes.data ?? [];
+        let nextPersonas: RichPersona[] = [];
+        let nextJourneys: RichJourneyMap[] = [];
+
+        phaseOneRuns.forEach((row) => {
+          const output = (row.output_json ?? {}) as Record<string, unknown>;
+          if (nextPersonas.length === 0 && Array.isArray(output.personas_rich)) {
+            nextPersonas = output.personas_rich as RichPersona[];
+          }
+          if (nextJourneys.length === 0 && Array.isArray(output.journeys_rich)) {
+            nextJourneys = output.journeys_rich as RichJourneyMap[];
+          }
+        });
+
+        setModules(uiModules);
+        setPersonasRich(nextPersonas);
+        setJourneysRich(nextJourneys);
+        if (projectRes.data?.name) {
+          setProjectName(projectRes.data.name);
+        }
+      },
+    });
+  }, [projectId, runApiCall]);
+
   const allScreens       = modules.flatMap(m => m.screens);
+  PERSONAS = derivePersonaCatalog(personasRich, allScreens.flatMap(screen => screen.personas)).map((persona) => ({
+    id: persona.name,
+    name: persona.name,
+    initials: persona.initials,
+    color: persona.color,
+    tag: persona.tag,
+  }));
+  FLOW_LANES = deriveRelationFlowLanes(
+    modules.map(module => ({
+      id: module.id,
+      name: module.name,
+      screens: module.screens.map(screen => ({
+        id: screen.id,
+        name: screen.name,
+        personas: screen.personas,
+        journeyStage: screen.journeyStage,
+        backlogRef: screen.backlogRef,
+      })),
+    })),
+  );
   const totalScreens     = allScreens.length;
   const sharedCount      = allScreens.filter(s => s.shared).length;
   const complexCount     = allScreens.filter(s => s.complexity === "Complex").length;
   const personasCovered  = new Set(allScreens.flatMap(s => s.personas)).size;
   const backlogRefs      = new Set(allScreens.map(s => s.backlogRef)).size;
-  const journeyStages    = new Set(allScreens.map(s => s.journeyStage)).size;
-  const coveragePct      = Math.round((journeyStages / 6) * 100);
+  const coverageMetrics  = computeStageCoverage(
+    allScreens.map(screen => screen.journeyStage),
+    journeysRich.flatMap(journey => journey.stages.map(stage => stage.title)),
+  );
+  const coveragePct      = coverageMetrics.percent;
   const warnCount        = allScreens.filter(s => s.warning || !s.states.includes("Error") || s.personas.length === 0).length;
   const missingErrorCount = allScreens.filter(s => !s.states.includes("Error")).length;
 
   const updateModule = (id: string, m: ScreenModule) =>
     setModules(prev => prev.map(mod => mod.id === id ? m : mod));
 
-  if (generating) return (
+  if (apiLoading) return (
     <SidebarProvider>
       <div className="min-h-screen flex w-full bg-background">
         <AppSidebar />
@@ -990,6 +1101,9 @@ const ScreenDerivation = () => {
           <div className="flex gap-1 mt-2">
             {[0,1,2].map(i => <div key={i} className="h-1.5 w-1.5 rounded-full bg-accent/40 animate-bounce" style={{ animationDelay: `${i * 0.15}s` }} />)}
           </div>
+          <Button variant="ghost" size="sm" className="text-xs text-muted-foreground mt-1" onClick={cancelApiCall}>
+            Cancel
+          </Button>
         </div>
       </div>
     </SidebarProvider>
@@ -999,20 +1113,10 @@ const ScreenDerivation = () => {
     <SidebarProvider>
       <div className="min-h-screen flex w-full bg-background">
         <AppSidebar />
-        <div className="flex-1 flex flex-col items-center justify-center gap-4 max-w-md mx-auto text-center px-6">
-          <div className="h-10 w-10 rounded-xl bg-destructive/10 flex items-center justify-center">
-            <AlertTriangle className="h-5 w-5 text-destructive" strokeWidth={1.5} />
-          </div>
-          <div>
-            <p className="text-sm font-medium text-foreground">Screen derivation failed</p>
-            <p className="text-xs text-muted-foreground mt-1 leading-relaxed">{apiError}</p>
-          </div>
-          <Button size="sm" className="rounded-xl gradient-accent text-accent-foreground text-xs gap-1.5"
-            onClick={() => { setGenerating(true); setApiError(null); runScreens(projectId!, true).then(res => setModules(mapApiToUiScreenModules(res.screens_rich))).catch(err => setApiError(err?.message ?? "Retry failed")).finally(() => setGenerating(false)); }}>
-            <RefreshCw className="h-3.5 w-3.5" strokeWidth={1.5} />
-            Retry
-          </Button>
-        </div>
+        <PhaseErrorState
+          details={getPhaseErrorDetails("Screen derivation", apiError)}
+          onRetry={() => runApiCall(signal => runScreens(projectId!, true, signal), { onSuccess: res => setModules(mapApiToUiScreenModules(res.screens_rich)) })}
+        />
       </div>
     </SidebarProvider>
   );
@@ -1103,7 +1207,7 @@ const ScreenDerivation = () => {
                   { label: "Shared",           value: sharedCount,     icon: Share2,    sub: `${totalScreens - sharedCount} exclusive` },
                   { label: "Complex",          value: complexCount,    icon: Zap,       sub: "require deep spec"                    },
                   { label: "Backlog Items",    value: backlogRefs,     icon: Link2,     sub: "linked sources"                       },
-                  { label: "Flow Coverage",    value: `${coveragePct}%`, icon: GitBranch, sub: `${journeyStages} of 6 stages`       },
+                  { label: "Flow Coverage",    value: `${coveragePct}%`, icon: GitBranch, sub: `${coverageMetrics.found} of ${coverageMetrics.total} stages`       },
                 ].map((stat, i) => (
                   <motion.div
                     key={stat.label}
