@@ -245,7 +245,8 @@ export const runAudit = (
   const requestKey = `form:/api/phase/04/audit:${projectId}:${fileSignature(files)}:${link}:${context}:${String(reRun)}`;
   return runRequest("/api/phase/04/audit", () =>
     dedupeRequest(requestKey, signal, () =>
-      authorizedFetch("/api/phase/04/audit", { method: "POST", body: form }, signal).then(parseResponse),
+      authorizedFetch("/api/phase/04/audit", { method: "POST", body: form }, signal)
+        .then((response) => parseResponse<{ audit_rich: RichScreenAudit[]; cached: boolean }>(response)),
     ),
   );
 };
@@ -269,7 +270,8 @@ export const runCopyReview = (
   const requestKey = `form:/api/phase/05/copy:${projectId}:${fileSignature(files)}:${link}:${context}:${String(reRun)}`;
   return runRequest("/api/phase/05/copy", () =>
     dedupeRequest(requestKey, signal, () =>
-      authorizedFetch("/api/phase/05/copy", { method: "POST", body: form }, signal).then(parseResponse),
+      authorizedFetch("/api/phase/05/copy", { method: "POST", body: form }, signal)
+        .then((response) => parseResponse<{ copy_rich: RichScreenCopyReview[]; cached: boolean }>(response)),
     ),
   );
 };

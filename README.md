@@ -91,7 +91,7 @@ Backend tests:
 
 ```bash
 cd backend
-pytest
+.venv\Scripts\python.exe -m unittest discover tests
 ```
 
 ## Deployment

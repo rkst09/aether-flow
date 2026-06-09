@@ -441,9 +441,9 @@ const EFFORT_STYLE: Record<EffortLevel, string> = {
   Low:    "bg-[hsl(var(--success-soft))] text-[hsl(var(--success))]",
 };
 
-function CycleBadge({ value, styles, cycle, onChange, prefix }: {
-  value: string; styles: Record<string, string>; cycle: string[];
-  onChange: (v: string) => void; prefix: string;
+function CycleBadge<T extends string>({ value, styles, cycle, onChange, prefix }: {
+  value: T; styles: Record<T, string>; cycle: readonly T[];
+  onChange: (v: T) => void; prefix: string;
 }) {
   return (
     <button
@@ -826,12 +826,18 @@ const JourneyMapping = () => {
   const [journeys, setJourneys] = useState<Record<string, JourneyStage[]>>({});
   const [personas, setPersonas] = useState<PersonaItem[]>([]);
   const [richJourneys, setRichJourneys] = useState<RichJourneyMap[]>([]);
-  const { run: runApiCall, cancel: cancelApiCall, loading: apiLoading, error: apiError } =
-    useApiCall<[{ personas_rich: RichPersona[]; cached: boolean }, { journeys_rich: RichJourneyMap[]; cached: boolean }]>({ initialLoading: true });
+  type JourneyInitialResponse = [
+    { personas_rich: RichPersona[]; cached: boolean },
+    { journeys_rich: RichJourneyMap[]; cached: boolean },
+  ];
+  const { run: runInitialApiCall, cancel: cancelApiCall, loading: apiLoading, error: apiError } =
+    useApiCall<JourneyInitialResponse>({ initialLoading: true });
+  const { run: runJourneyApiCall } =
+    useApiCall<{ journeys_rich: RichJourneyMap[]; cached: boolean }>();
 
   useEffect(() => {
     if (!projectId) return;
-    runApiCall(signal => Promise.all([runPersonas(projectId, false, signal), runJourney(projectId, false, signal)]), {
+    runInitialApiCall(signal => Promise.all([runPersonas(projectId, false, signal), runJourney(projectId, false, signal)]), {
       onSuccess: ([personasRes, journeyRes]) => {
         const items = buildPersonaItems(personasRes.personas_rich);
         setPersonas(items);
@@ -840,14 +846,14 @@ const JourneyMapping = () => {
         setJourneys(buildJourneyState(journeyRes.journeys_rich));
       },
     });
-  }, [projectId, runApiCall]);
+  }, [projectId, runInitialApiCall]);
 
   const handleRegenerate = useCallback(() => {
     if (!projectId) return;
-    runApiCall(signal => runJourney(projectId, true, signal), {
+    runJourneyApiCall(signal => runJourney(projectId, true, signal), {
       onSuccess: res => { setRichJourneys(res.journeys_rich); setJourneys(buildJourneyState(res.journeys_rich)); },
     });
-  }, [projectId, runApiCall]);
+  }, [projectId, runJourneyApiCall]);
 
   const handleProceed = useCallback(async () => {
     if (!projectId) return;

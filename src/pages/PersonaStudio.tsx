@@ -262,7 +262,7 @@ function buildPersonaWordMarkup(personas: Persona[]) {
           <tr><td style="padding:6pt;border:1pt solid #e5e7eb;font-weight:bold;">Device</td><td style="padding:6pt;border:1pt solid #e5e7eb;">${escapeHtml(persona.identity.device || "-")}</td></tr>
           <tr><td style="padding:6pt;border:1pt solid #e5e7eb;font-weight:bold;">Priority Score</td><td style="padding:6pt;border:1pt solid #e5e7eb;">${persona.businessValue.priorityScore}</td></tr>
         </table>
-        ${[
+        ${([
           ["Primary goals", persona.goals.primary],
           ["Secondary goals", persona.goals.secondary],
           ["Emotional goals", persona.goals.emotional],
@@ -277,10 +277,10 @@ function buildPersonaWordMarkup(personas: Persona[]) {
           ["Drop-off risks", persona.journey.dropOffRisks],
           ["Missing data", persona.missingData],
           ["AI recommendations", persona.aiRecommendations],
-        ]
+        ] satisfies Array<[string, string[]]>)
           .map(([label, items]) => `
             <h3 style="font-size:12pt;margin:12pt 0 6pt;">${escapeHtml(label)}</h3>
-            <p style="font-size:10pt;margin:0 0 6pt;line-height:1.5;">${escapeHtml(formatList(items as string[]))}</p>
+            <p style="font-size:10pt;margin:0 0 6pt;line-height:1.5;">${escapeHtml(formatList(items))}</p>
           `)
           .join("")}
         <h3 style="font-size:12pt;margin:12pt 0 6pt;">Behavior profile</h3>

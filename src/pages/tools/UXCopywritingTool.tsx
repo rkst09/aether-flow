@@ -13,6 +13,8 @@ import aetherLogo from "@/assets/aether-logo.png";
 import { runCopyReview, type RichScreenCopyReview, type RichCopyItem } from "@/lib/api";
 import { supabase } from "@/lib/supabase";
 import { useAuth } from "@/contexts/AuthContext";
+import { SidebarProvider, SidebarTrigger } from "@/components/ui/sidebar";
+import { AppSidebar } from "@/components/dashboard/AppSidebar";
 
 // ─── Types ────────────────────────────────────────────────────────────────────
 
@@ -344,12 +346,17 @@ export default function UXCopywritingTool() {
   const highCount = allItems.filter(i => i.severity === "High").length;
 
   return (
+    <SidebarProvider>
+      <div className="min-h-screen flex w-full bg-background">
+        <AppSidebar />
+        <main className="flex-1 min-w-0 overflow-auto">
     <div className="min-h-screen" style={{ background: "#FFFFFF" }}>
 
       {/* Header */}
       <header className="sticky top-0 z-10 flex items-center justify-between px-6 py-4"
         style={{ background: "#FFFFFF", borderBottom: "1px solid #E5E7EB" }}>
         <div className="flex items-center gap-2">
+          <SidebarTrigger className="mr-2 text-muted-foreground hover:text-foreground" />
           <img src={aetherLogo} alt="Aether" className="h-6 w-6 rounded-md object-contain"
             style={{ background: "#EEF2FF", padding: "2px" }} />
           <span className="text-sm font-semibold" style={{ color: "#0F172A" }}>Aether</span>
@@ -617,5 +624,8 @@ export default function UXCopywritingTool() {
         </AnimatePresence>
       </div>
     </div>
+        </main>
+      </div>
+    </SidebarProvider>
   );
 }

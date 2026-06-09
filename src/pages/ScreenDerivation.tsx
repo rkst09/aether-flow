@@ -1005,7 +1005,14 @@ const ScreenDerivation = () => {
   const [modules,     setModules]     = useState<ScreenModule[]>([]);
   const [personasRich, setPersonasRich] = useState<RichPersona[]>([]);
   const [journeysRich, setJourneysRich] = useState<RichJourneyMap[]>([]);
-  const { run: runApiCall, cancel: cancelApiCall, loading: apiLoading, error: apiError } = useApiCall({ initialLoading: true });
+  const { run: runApiCall, cancel: cancelApiCall, loading: apiLoading, error: apiError } = useApiCall<
+    [
+      { screens_rich: RichScreenModule[]; cached: boolean },
+      { data: { name?: string } | null },
+      { data: Array<{ output_json: Record<string, unknown> | null }> | null },
+    ]
+  >({ initialLoading: true });
+  const { run: runScreensRetry } = useApiCall<{ screens_rich: RichScreenModule[]; cached: boolean }>();
   const [projectName, setProjectName] = useState("Aether Platform");
   const [activeTab,   setActiveTab]   = useState("list");
   const [listFilter,  setListFilter]  = useState<"all" | "shared" | "exclusive">("all");
@@ -1115,7 +1122,7 @@ const ScreenDerivation = () => {
         <AppSidebar />
         <PhaseErrorState
           details={getPhaseErrorDetails("Screen derivation", apiError)}
-          onRetry={() => runApiCall(signal => runScreens(projectId!, true, signal), { onSuccess: res => setModules(mapApiToUiScreenModules(res.screens_rich)) })}
+          onRetry={() => runScreensRetry(signal => runScreens(projectId!, true, signal), { onSuccess: res => setModules(mapApiToUiScreenModules(res.screens_rich)) })}
         />
       </div>
     </SidebarProvider>

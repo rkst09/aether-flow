@@ -14,6 +14,7 @@ import {
   type DerivedIANode,
   type DerivedOpenQuestion,
   type DerivedUserFlow,
+  type BacklogModuleInsight,
   type PersonaContextCard,
 } from "@/lib/pipeline-insights";
 import { Button } from "@/components/ui/button";
@@ -356,8 +357,8 @@ const I_STYLE: Record<ImpactType, string> = {
   Performance: "bg-amber-50 text-amber-600",
 };
 
-function CycleBadge({ value, styles, cycle, onChange, prefix }: {
-  value: string; styles: Record<string, string>; cycle: string[]; onChange: (v: string) => void; prefix: string;
+function CycleBadge<T extends string>({ value, styles, cycle, onChange, prefix }: {
+  value: T; styles: Record<T, string>; cycle: readonly T[]; onChange: (v: T) => void; prefix: string;
 }) {
   return (
     <button onClick={() => { const i = cycle.indexOf(value); onChange(cycle[(i + 1) % cycle.length]); }}
@@ -1187,7 +1188,14 @@ const DesignBacklog = () => {
   const [personasRich, setPersonasRich] = useState<RichPersona[]>([]);
   const [journeysRich, setJourneysRich] = useState<RichJourneyMap[]>([]);
   const [questions, setQuestions] = useState<OpenQuestion[]>(INITIAL_QUESTIONS);
-  const { run: runApiCall, cancel: cancelApiCall, loading: apiLoading, error: apiError } = useApiCall({ initialLoading: true });
+  const { run: runApiCall, cancel: cancelApiCall, loading: apiLoading, error: apiError } = useApiCall<
+    [
+      { backlog_rich: RichBacklogModule[]; cached: boolean },
+      { data: { name?: string } | null },
+      { data: Array<{ output_json: Record<string, unknown> | null }> | null },
+    ]
+  >({ initialLoading: true });
+  const { run: runBacklogRetry } = useApiCall<{ backlog_rich: RichBacklogModule[]; cached: boolean }>();
 
   useEffect(() => {
     if (!projectId) return;
@@ -1287,7 +1295,7 @@ const DesignBacklog = () => {
         <AppSidebar />
         <PhaseErrorState
           details={getPhaseErrorDetails("Backlog generation", apiError)}
-          onRetry={() => runApiCall(signal => runBacklog(projectId!, true, signal), { onSuccess: res => setModules(mapApiToUiModules(res.backlog_rich)) })}
+          onRetry={() => runBacklogRetry(signal => runBacklog(projectId!, true, signal), { onSuccess: res => setModules(mapApiToUiModules(res.backlog_rich)) })}
         />
       </div>
     </SidebarProvider>
